@@ -1,0 +1,7 @@
+{
+  "out": "./docs",
+  "name": "uniswap",
+  "theme": "markdown",
+  "readme": "none",
+  "tsconfig": "./tsconfig.bundle.json"
+}
