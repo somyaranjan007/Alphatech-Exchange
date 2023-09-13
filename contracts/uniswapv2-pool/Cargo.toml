@@ -1,5 +1,5 @@
 [package]
-name = "uniswapv3-pool"
+name = "uniswapv2-pool"
 version = "0.1.0"
 authors = ["somyaranjan007 <somyaranjan122@gmail.com>"]
 edition = "2021"

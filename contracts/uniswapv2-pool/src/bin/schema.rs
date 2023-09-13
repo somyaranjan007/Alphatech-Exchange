@@ -1,6 +1,6 @@
 use cosmwasm_schema::write_api;
 
-use uniswapv3_pool::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
+use uniswapv2_pool::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 
 fn main() {
     write_api! {
