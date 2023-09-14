@@ -1,18 +1,27 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::Uint128;
+use cw20:: {TokenInfoResponse, BalanceResponse};
 
 
 /// Message type for `instantiate` entry_point
 #[cw_serde]
-pub struct InstantiateMsg {}
+pub struct InstantiateMsg {
+     /// name of the derivative token
+     pub name: String,
+     /// symbol / ticker of the derivative token
+     pub symbol: String,
+     /// decimal places of the derivative token (for UI)
+     pub decimals: u8,
+}
 
 
 /// Message type for `execute` entry_point
 #[cw_serde]
 pub enum ExecuteMsg {
-    Mint { to: String },
+    Mint (MintRecieveParams),
+    Burn (BurnRecieveParams),
+    Swap (SwapRecieveParams)
 
-    Burn { from: String },
 }
 
 /// Message type for `migrate` entry_point
@@ -23,19 +32,36 @@ pub enum MigrateMsg {}
 #[cw_serde]
 #[derive(QueryResponses)]
 pub enum QueryMsg {
-    #[returns(GetPoolDataResponse)]
-    GetPoolData {},
-}
-#[cw_serde]
-pub struct GetPoolDataResponse {
-    pub token0: String,
-    pub token1: String,
-    pub reserve0: Uint128,
-    pub reserve1: Uint128,
+    #[returns(TokenInfoResponse)]
+    TokenInfo {},
+
+    #[returns(BalanceResponse)]
+    Balance { address: String },
 }
 
 #[cw_serde]
 pub struct PoolDataResponse {
-    pub amount0: String,
-    pub amount1: String
+    pub reserve0: String,
+    pub reserve1: String,
+}
+
+#[cw_serde]
+pub struct MintRecieveParams {
+    pub to: String,
+    pub amount0: Uint128,
+    pub amount1: Uint128
+}
+
+#[cw_serde]
+pub struct BurnRecieveParams {
+    pub to: String,
+    pub amount0: Uint128,
+    pub amount1: Uint128
+}
+
+#[cw_serde]
+pub struct SwapRecieveParams{
+    pub amount0Out:Uint128,
+    pub amount1Out:Uint128,
+    pub to: String,
 }
