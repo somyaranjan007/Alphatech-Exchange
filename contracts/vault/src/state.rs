@@ -38,8 +38,7 @@ pub struct PoolData {
     pub token0: String,
     pub token1: String,
     pub reserve0: Uint128,
-    pub reserve1: Uint128,
-    pub lp_token_contract: String,
+    pub reserve1: Uint128
 }
 
 /**

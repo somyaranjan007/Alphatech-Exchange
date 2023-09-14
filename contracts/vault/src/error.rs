@@ -9,6 +9,12 @@ pub enum ContractError {
     #[error("Unauthorized")]
     Unauthorized {},
 
+    #[error("Already existed pool")]
+    PoolExisted {},
+
+    #[error("Unable to fetch pool data")]
+    FetchPoolDataError {},
+
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },
     // Add any other custom errors you like here.

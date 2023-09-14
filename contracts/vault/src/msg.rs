@@ -22,7 +22,7 @@ pub enum ExecuteMsg {
     /**
      * 2. RegisterPool: This function is used to register a pool contract in the vault.
      *
-     * Parameters:
+     * Parameters are defined in RegisterPoolParams:
      * - `pool_address`: The address of the pool contract to be registered.
      * - `token0`: The address or identifier of the first token in the token pair managed by the pool.
      * - `token1`: The address or identifier of the second token in the token pair managed by the pool.
@@ -30,15 +30,10 @@ pub enum ExecuteMsg {
      *
      * In a liquidity pool, `token0` and `token1` represent a token pair that the pool manages. Users can provide liquidity in the form of both `token0` and `token1`, and in return, they receive LP (Liquidity Provider) tokens from the `lp_token_contract`.
      */
-    RegisterPool {
-        pool_address: String,
-        token0: String,
-        token1: String,
-        lp_token_contract: String,
-    },
+    RegisterPool(RegisterPoolParams),
 
     /**
-     * AddLiquidity: This function allows a user to add liquidity to a specific pool contract.
+     * 3. AddLiquidity: This function allows a user to add liquidity to a specific pool contract.
      *
      * Parameters are defined in AddLiquidityParams:
      * - `pool_address`: The address of the pool contract where liquidity will be added.
@@ -60,6 +55,14 @@ pub enum ExecuteMsg {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
+pub struct RegisterPoolParams {
+    pub pool_address: String,
+    pub token0: String,
+    pub token1: String
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+#[serde(rename_all = "snake_case")]
 pub struct AddLiquidityParams {
     pub pool_address: String,
     pub token_a: String,
@@ -71,6 +74,31 @@ pub struct AddLiquidityParams {
     pub address_to: String,
     pub deadline: Uint256,
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /// Message type for `migrate` entry_point
 #[cw_serde]

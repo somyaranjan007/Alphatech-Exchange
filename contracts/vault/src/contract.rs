@@ -4,7 +4,7 @@ use cosmwasm_std::{Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response, Std
 use cw2::set_contract_version;
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, AddLiquidityParams};
+use crate::msg::{AddLiquidityParams, ExecuteMsg, InstantiateMsg, RegisterPoolParams};
 use crate::state::{PoolData, FACTORY_REGISTER, POOL_REGISTER, VAULT_OWNER};
 
 const CONTRACT_NAME: &str = "crates.io:vault";
@@ -43,21 +43,12 @@ pub fn execute(
         ExecuteMsg::RegisterFactory { factory_address } => {
             execute::execute_register_factory(_deps, _env, _info, factory_address)
         }
-        ExecuteMsg::RegisterPool {
-            pool_address,
-            token0,
-            token1,
-            lp_token_contract,
-        } => execute::execute_register_pool(
-            _deps,
-            _env,
-            _info,
-            pool_address,
-            token0,
-            token1,
-            lp_token_contract,
-        ),
-        ExecuteMsg::AddLiquidity(add_liquidity_params) => execute::execute_add_liquidity(_deps, _env, _info, add_liquidity_params)
+        ExecuteMsg::RegisterPool(register_pool_params) => {
+            execute::execute_register_pool(_deps, _env, _info, register_pool_params)
+        }
+        ExecuteMsg::AddLiquidity(add_liquidity_params) => {
+            execute::execute_add_liquidity(_deps, _env, _info, add_liquidity_params)
+        }
     }
 }
 
@@ -104,10 +95,7 @@ pub mod execute {
         _deps: DepsMut,
         _env: Env,
         _info: MessageInfo,
-        _pool: String,
-        _token0: String,
-        _token1: String,
-        _lp_token_contract: String,
+        _register_pool_params: RegisterPoolParams,
     ) -> Result<Response, ContractError> {
         // Check if the factory contract is registered
         let factory_registered = FACTORY_REGISTER.load(_deps.storage, _info.sender.to_string());
@@ -123,31 +111,70 @@ pub mod execute {
                     // Create a new `PoolData` instance to store pool registration information
                     let pool_data = PoolData {
                         registered: true,
-                        token0: _token0,
-                        token1: _token1,
+                        token0: _register_pool_params.token0,
+                        token1: _register_pool_params.token1,
                         reserve0: Uint128::zero(),
                         reserve1: Uint128::zero(),
-                        lp_token_contract: _lp_token_contract,
                     };
 
                     // Save the pool registration data in the `POOL_REGISTER` mapping
-                    POOL_REGISTER.save(_deps.storage, _pool.clone(), &pool_data)?;
+                    POOL_REGISTER.save(
+                        _deps.storage,
+                        _register_pool_params.pool_address.clone(),
+                        &pool_data,
+                    )?;
 
                     // Return a successful response with attributes
                     Ok(Response::new()
                         .add_attribute("function", "execute_register_pool")
-                        .add_attribute("pool_contract_address", _pool))
+                        .add_attribute("pool_contract_address", _register_pool_params.pool_address))
                 }
             }
             Err(_) => {
+                // Return an error if the factory contract is not found in storage
                 return Err(ContractError::CustomError {
                     val: "Unable to find factory contract!".to_string(),
-                })
+                });
             }
         }
     }
 
-    pub fn execute_add_liquidity(_deps: DepsMut, _env: Env, _info: MessageInfo, _add_liquidity_params: AddLiquidityParams) -> Result<Response, ContractError> {
+    fn swap(_token_a: String, _token_b: String) -> (String, String) {
+        let (_token0, _token1) = if _token_a > _token_b {
+            (_token_b, _token_a)
+        } else {
+            (_token_a, _token_b)
+        };
+
+        (_token0, _token1)
+    }
+
+    fn get_reserves(_token_a: String, _token_b: String) -> (Uint128, Uint128) {
+        let (_token0, _) = swap(_token_a, _token_b);
+
+        let (reserve_a, reserve_b) = if _token0 == _token_a {
+            ()
+        }
+
+        todo!()
+    }
+
+    pub fn execute_add_liquidity(
+        _deps: DepsMut,
+        _env: Env,
+        _info: MessageInfo,
+        _add_liquidity_params: AddLiquidityParams,
+    ) -> Result<Response, ContractError> {
+        let fetch_pool_data = POOL_REGISTER.load(_deps.storage, _add_liquidity_params.pool_address);
+
+        match fetch_pool_data {
+            Ok(data) => {
+                // step 1 
+            },
+            Err(_) => {
+                return Err(ContractError::FetchPoolDataError {})
+            }
+        }
         todo!()
     }
 }
