@@ -4,13 +4,18 @@ use cosmwasm_std::{
     to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response, StdResult, Uint128,
 };
 use cw2::set_contract_version;
-use cw20_base::contract::{execute_burn, execute_mint, query_token_info, query_balance};
-use cw20_base::state::{MinterData, TokenInfo, TOKEN_INFO, BALANCES};
+use cw20_base::contract::{execute_burn, execute_mint, query_balance, query_token_info};
+use cw20_base::state::{MinterData, TokenInfo, BALANCES, TOKEN_INFO};
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, MintRecieveParams, QueryMsg, AmountOutParams, AmountInParams};
+use crate::msg::{
+    AmountInParams, AmountOutParams, ExecuteMsg, InstantiateMsg, MigrateMsg, MintRecieveParams,
+    QueryMsg,
+};
 use num::integer::Roots;
 use std::cmp::min;
+
+use self::query::{query_get_amountout, query_get_amountin};
 
 const CONTRACT_NAME: &str = "crates.io:uniswapv2-pool";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -55,55 +60,63 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Mint(MintRecieveParams) => execute::execute_pool_mint(_deps, _env, _info, MintRecieveParams),
-        ExecuteMsg::Burn (BurnRecieveParams) => execute::execute_pool_burn(_deps, _env, _info, BurnRecieveParams),
-        ExecuteMsg::GetAmountOut(AmountOutParams) => execute:: execute_get_amountout(_deps,_env,_info,AmountOutParams),
-        ExecuteMsg::GetAmountIn(AmountInParams) => execute:: execute_get_amountin(_deps,_env,_info,AmountInParams),
+        ExecuteMsg::Mint(MintRecieveParams) => {
+            execute::execute_pool_mint(_deps, _env, _info, MintRecieveParams)
+        }
+        ExecuteMsg::Burn(BurnRecieveParams) => {
+            execute::execute_pool_burn(_deps, _env, _info, BurnRecieveParams)
+        }
+        ExecuteMsg::BurnLpToken { amount } => {
+            execute::execute_burn_lptokens(_deps, _env, _info, amount)
+        }
+        ExecuteMsg::MintLpToken { recipient, amount } => {
+            execute::execute_mint_lptokens(_deps, _env, _info, recipient, amount)
+        }
+        
     }
 }
 
 pub mod execute {
-    use std::ops::{Mul, Add, Div, Sub};
+
+    use std::ops::Mul;
 
     use super::*;
-    use crate::{msg::{PoolDataResponse, BurnRecieveParams}, ContractError};
-    use cosmwasm_std::{QueryRequest, StdError, WasmQuery};
+    use crate::{
+        msg::{BurnRecieveParams, PoolDataResponse},
+        ContractError,
+    };
+    use cosmwasm_std::{QueryRequest, StdError, WasmQuery, WasmMsg};
 
-    //mint functionality
+    // mint functionality
     pub fn execute_pool_mint(
         _deps: DepsMut,
         _env: Env,
         _info: MessageInfo,
         _msg: MintRecieveParams,
     ) -> Result<Response, ContractError> {
-       
-        //1. first we need how much token0 and token1 has in specific pool contract.
-        //2. we need token0 and token1 reserve in sorted order
-        //3. find amount deposited
+        // 1. first we need how much token0 and token1 has in specific pool contract.
+        // 2. we need token0 and token1 reserve in sorted order
+        // 3. find amount deposite
         let pool_data: Result<PoolDataResponse, StdError> =
             match _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
                 contract_addr: _info.sender.to_string(),
-                msg: to_binary(&pool_data_info)?,
+                msg: to_binary(&query_pool_data {
+                    address:_info.sender.to_string()
+                 })?,
             })) {
                 Ok(data) => Ok(data),
                 Err(_) => {
-                    return Err(ContractError::CustomError {
-                        val: "Unable to fetch reserves".to_string(),
-                    });
+                    return Err(ContractError::FetchReserveFailed {});
                 }
             };
 
         //4. get total supply of lp tokens
         let total_supply = match TOKEN_INFO.load(_deps.storage) {
             Ok(data) => data.total_supply,
-            Err(_) => {
-                return Err(ContractError::CustomError {
-                    val: "unable to fetch total supply".to_string(),
-                })
-            }
+            Err(_) => return Err(ContractError::FetchTotalSupplyFailed {}),
         };
 
-        //5. if total supply is zero. then call the lptoken_mint with some min_amount else calculate
+        // 5. if total supply is zero. then call the lptoken_mint with some min_amount else calculate
         let amount0 = _msg.amount0;
         let amount1 = _msg.amount1;
 
@@ -112,7 +125,7 @@ pub mod execute {
             let min_liquidity = Uint128::from(1000);
             liquidity =
                 Uint128::from(u128::from(amount0.mul(amount1)).sqrt() - u128::from(min_liquidity));
-            // call into cw20-base to mint tokens to owner, call as self as no one else is allowed
+            // call into cw20-base to mint tokens to owner, call as self     as no one else is allowed
             match execute_mint(
                 _deps.branch(),
                 _env.clone(),
@@ -121,11 +134,7 @@ pub mod execute {
                 min_liquidity,
             ) {
                 Ok(data) => data.add_attribute("minted_to", "adress0x"),
-                Err(_) => {
-                    return Err(ContractError::CustomError {
-                        val: "unable to mint tokens".to_string(),
-                    })
-                }
+                Err(_) => return Err(ContractError::MintTokenFailed {}),
             };
         } else {
             liquidity = min(
@@ -134,24 +143,24 @@ pub mod execute {
             )
         }
 
-        //6. chck L should not be zero
+        // 6. chck L should not be zero
         if liquidity.le(&Uint128::from(0)) {
-            return Err(ContractError::CustomError {
-                val: "liquiity is insufficient".to_string(),
-            });
+            return Err(ContractError::InsufficientLiquidity {});
         }
 
-        //7. mint lptoken to user
-        match execute_mint(_deps.branch(), _env.clone(), _info, _msg.to, liquidity) {
-            Ok(data) => data
-                .add_attribute("minted_to", _msg.to)
-                .add_attribute("minted_amount", liquidity),
-            Err(_) => {
-                return Err(ContractError::CustomError {
-                    val: "unable to mint tokens to user".to_string(),
-                })
-            }
+        // 7. mint lptoken to user
+        // match execute_mint(_deps.branch(), _env.clone(), _info, _msg.to, liquidity) {
+        //     Ok(data) => data
+        //         .add_attribute("minted_to", _msg.to)
+        //         .add_attribute("minted_amount", liquidity),
+        //     Err(_) => return Err(ContractError::MintTokenFailed {}),
+        // };
+        let mint_execute_tx = WasmMsg::Execute { 
+            contract_addr: _env.contract.address.to_string(), 
+            msg: to_binary(&ExecuteMsg::MintLpToken { recipient: _msg.to, amount: liquidity })?, 
+            funds: vec![]
         };
+        Ok(Response::new().add_message(mint_execute_tx));
 
         //8. update new reserve of token0 and token1
         // _update(balance0, balance1);  this will be updated from vault contract
@@ -167,94 +176,61 @@ pub mod execute {
         _info: MessageInfo,
         _msg: BurnRecieveParams,
     ) -> Result<Response, ContractError> {
-        
         //1.get amount0 and amount1
         let amount0 = _msg.amount0;
         let amount1 = _msg.amount1;
         //2.get liquidity amount to be burned that user have sent to pool
         let liquidity = match BALANCES.load(_deps.storage, &_env.contract.address) {
             Ok(poolBalance) => poolBalance,
-            Err(_) => return Err(ContractError::CustomError { val: "unable to fetch liquiity".to_string() })
+            Err(_) => return Err(ContractError::FetchLiquidityFailed {}),
         };
         //3. check any amount0 or amount1 should not be zero
         if amount0.le(&Uint128::from(0u128)) || amount1.le(&Uint128::from(0u128)) {
-            return Err(ContractError::CustomError { val: " InsufficientLiquidityBurned".to_string() });
-        } 
-        
-        //4. burn liquidity from pool 
-        match execute_burn(_deps, _env.clone(), _info, liquidity) {
-            Ok(data) => data
-                .add_attribute("burnt_amount", liquidity),
-            Err(_) => {
-                return Err(ContractError::CustomError {
-                    val: "unable to burn tokens of user".to_string(),
-                })
-            }
+            return Err(ContractError::CustomError {
+                val: " InsufficientLiquidityBurned".to_string(),
+            });
+        }
+
+        //4. burn liquidity from pool
+        // match execute_burn(_deps, _env.clone(), _info, liquidity) {
+        //     Ok(data) => data.add_attribute("burnt_amount", liquidity),
+        //     Err(_) => return Err(ContractError::BurnTokenFailed {}),
+        // };
+        let burn_execute_tx = WasmMsg::Execute { 
+            contract_addr: _env.contract.address.to_string(), 
+            msg: to_binary(&ExecuteMsg::BurnLpToken {  amount: liquidity })?, 
+            funds: vec![]
         };
-        
+        Ok(Response::new().add_message(burn_execute_tx))
+
         //5. transfer amount0 and amount1 to user in vault
         //6. update token balance and pool reserves in sorted order in vault
-        // Ok(Response::new());
-        unimplemented!();
+        
     }
 
-    pub fn execute_get_amountout(
+    
+    pub fn execute_mint_lptokens(
         _deps: DepsMut,
         _env: Env,
         _info: MessageInfo,
-        _msg: AmountOutParams,
-    )->Result<Response,ContractError>{
-        let amount_in = _msg.amountIn;
-        let reserve_in = _msg.reserveIn;
-        let reserve_out = _msg.reserveOut;
-        
-        //1.check amountIn, reserveIn and reserveOut should not be zero
-        if amount_in.is_zero() {
-            return Err(ContractError::CustomError { val: "InsufficientAmount".to_string() });
+        recipient: String,
+        amount: Uint128,
+    ) -> Result<Response, ContractError> {
+        match execute_mint(_deps, _env, _info, recipient, amount) {
+            Ok(data) => Ok(data),
+            Err(_) => return Err(ContractError::MintTokenFailed {}),
         }
-
-        if reserve_in.is_zero() || reserve_out.is_zero() {
-            return Err(ContractError::CustomError { val: "InsufficientLiquidity".to_string() });
-        }
-
-        let amount_in_with_fee = amount_in.mul(Uint128::from(997u128));
-        let numerator = amount_in_with_fee.mul(reserve_out);
-        let denominator = (reserve_in.mul(Uint128::from(1000u128))).add(amount_in_with_fee);
-        let amountout = numerator.div(denominator);
-
-        Ok(Response::new()
-        .add_attribute("amount_out", amountout.to_string()))
-
-      
     }
-
-    pub fn execute_get_amountin(
+    pub fn execute_burn_lptokens(
         _deps: DepsMut,
         _env: Env,
         _info: MessageInfo,
-        _msg: AmountInParams,
-    )->Result<Response,ContractError>{
-        let amount_out = _msg.amountOut;
-        let reserve_in = _msg.reserveIn;
-        let reserve_out = _msg.reserveOut;
-        
-        //1.check amountIn, reserveIn and reserveOut should not be zero
-        if amount_out.is_zero() {
-            return Err(ContractError::CustomError { val: "InsufficientAmount".to_string() });
+        amount: Uint128,
+    ) -> Result<Response, ContractError> {
+        match execute_burn(_deps, _env, _info, amount) {
+            Ok(data) => Ok(data),
+            Err(_) => return Err(ContractError::BurnTokenFailed {}),
         }
-
-        if reserve_in.is_zero() || reserve_out.is_zero() {
-            return Err(ContractError::CustomError { val: "InsufficientLiquidity".to_string() });
-        }
-
-        let numerator = amount_out.mul(Uint128::from(1000u128)).mul(reserve_out);
-        let denominator = reserve_out.sub(amount_out).mul(Uint128::from(997u128));
-        let amountin = numerator.div(denominator).add(Uint128::from(1u128));
-
-        Ok(Response::new()
-        .add_attribute("amount_in", amountin.to_string()))
-
-      
     }
 }
 
@@ -262,7 +238,74 @@ pub mod execute {
 pub fn query(_deps: Deps, _env: Env, _info: MessageInfo, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::TokenInfo {} => to_binary(&query_token_info(_deps)?),
-        QueryMsg::Balance { address }=> to_binary(&query_balance(_deps, address)?),
+        QueryMsg::Balance { address } => to_binary(&query_balance(_deps, address)?),
+        QueryMsg::GetAmountOut(AmountOutParams) => to_binary(&query_get_amountout(_deps, _env, _info, AmountOutParams)),
+        QueryMsg::GetAmountIn(AmountInParams) => to_binary(&query_get_amountin(_deps, _env, _info, AmountInParams))
+        // ExecuteMsg::GetAmountOut(AmountOutParams) => {
+        //     execute::execute_get_amountout(_deps, _env, _info, AmountOutParams)
+        // }
+        // ExecuteMsg::GetAmountIn(AmountInParams) => {
+        //     execute::execute_get_amountin(_deps, _env, _info, AmountInParams)
+        // }
+    }
+}
+
+pub mod query {
+    use std::ops::{Mul, Sub, Div, Add};
+
+    use super::*;
+
+    pub fn query_get_amountin(
+        _deps: Deps,
+        _env: Env,
+        _info: MessageInfo,
+        _msg: AmountInParams,
+    ) -> Result<Uint128, ContractError> {
+        let amount_out = _msg.amountOut;
+        let reserve_in = _msg.reserveIn;
+        let reserve_out = _msg.reserveOut;
+
+        //1.check amountIn, reserveIn and reserveOut should not be zero
+        if amount_out.is_zero() {
+            return Err(ContractError::InsufficientAmount {});
+        }
+
+        if reserve_in.is_zero() || reserve_out.is_zero() {
+            return Err(ContractError::InsufficientLiquidity {});
+        }
+
+        let numerator = amount_out.mul(Uint128::from(1000u128)).mul(reserve_out);
+        let denominator = reserve_out.sub(amount_out).mul(Uint128::from(997u128));
+        let amount_in = numerator.div(denominator).add(Uint128::from(1u128));
+
+        Ok(amount_in)
+    }
+
+    pub fn query_get_amountout(
+        _deps: Deps,
+        _env: Env,
+        _info: MessageInfo,
+        _msg: AmountOutParams,
+    ) -> Result<Uint128, ContractError> {
+        let amount_in = _msg.amountIn;
+        let reserve_in = _msg.reserveIn;
+        let reserve_out = _msg.reserveOut;
+
+        //1.check amountIn, reserveIn and reserveOut should not be zero
+        if amount_in.is_zero() {
+            return Err(ContractError::InsufficientAmount {});
+        }
+
+        if reserve_in.is_zero() || reserve_out.is_zero() {
+            return Err(ContractError::InsufficientLiquidity {});
+        }
+
+        let amount_in_with_fee = amount_in.mul(Uint128::from(997u128));
+        let numerator = amount_in_with_fee.mul(reserve_out);
+        let denominator = (reserve_in.mul(Uint128::from(1000u128))).add(amount_in_with_fee);
+        let amountout = numerator.div(denominator);
+
+        Ok(amountout)
     }
 }
 

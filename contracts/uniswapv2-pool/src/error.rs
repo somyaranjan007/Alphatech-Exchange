@@ -10,6 +10,28 @@ pub enum ContractError {
     #[error("Unauthorized")]
     Unauthorized {},
 
+    #[error("Unable to Fetch Reserve")]
+    FetchReserveFailed {},
+    
+    #[error("Unable to Fetch TotalSupply")]
+    FetchTotalSupplyFailed {},
+
+    #[error("Liquiity id not sufficient")]
+    FetchLiquidityFailed {},
+    
+    #[error("Unable to Mint Lp-Tokens")]
+    MintTokenFailed {},
+    
+    #[error("Liquiity id not sufficient")]
+    InsufficientLiquidity {},
+
+    #[error("Unable to Burn user Lp-Tokens")]
+    BurnTokenFailed {},
+    
+    #[error("Insufficient amount entered")]
+    InsufficientAmount {},
+    
+
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },
 }

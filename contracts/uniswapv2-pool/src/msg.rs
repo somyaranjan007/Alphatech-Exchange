@@ -20,9 +20,8 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
     Mint (MintRecieveParams),
     Burn (BurnRecieveParams),
-    GetAmountOut (AmountOutParams),
-    GetAmountIn (AmountInParams)
-
+    BurnLpToken { amount: Uint128 },
+    MintLpToken { recipient:String  ,amount: Uint128 },
 }
 
 /// Message type for `migrate` entry_point
@@ -38,12 +37,18 @@ pub enum QueryMsg {
 
     #[returns(BalanceResponse)]
     Balance { address: String },
+    
+    #[returns(Uint128)]
+    GetAmountOut (AmountOutParams),
+
+    #[returns(Uint128)]
+    GetAmountIn (AmountInParams),
 }
 
 #[cw_serde]
 pub struct PoolDataResponse {
-    pub reserve0: String,
-    pub reserve1: String,
+    pub reserve0: Uint128,
+    pub reserve1: Uint128,
 }
 
 #[cw_serde]
