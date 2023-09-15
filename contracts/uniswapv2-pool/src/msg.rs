@@ -20,7 +20,8 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
     Mint (MintRecieveParams),
     Burn (BurnRecieveParams),
-    Swap (SwapRecieveParams)
+    GetAmountOut (AmountOutParams),
+    GetAmountIn (AmountInParams)
 
 }
 
@@ -60,8 +61,15 @@ pub struct BurnRecieveParams {
 }
 
 #[cw_serde]
-pub struct SwapRecieveParams{
-    pub amount0Out:Uint128,
-    pub amount1Out:Uint128,
-    pub to: String,
+pub struct AmountOutParams{
+    pub amountIn: Uint128,
+    pub reserveIn: Uint128,
+    pub reserveOut: Uint128,
 }
+#[cw_serde]
+pub struct AmountInParams{
+    pub amountOut: Uint128,
+    pub reserveIn: Uint128,
+    pub reserveOut: Uint128,
+}
+

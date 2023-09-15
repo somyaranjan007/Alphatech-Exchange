@@ -8,7 +8,7 @@ use cw20_base::contract::{execute_burn, execute_mint, query_token_info, query_ba
 use cw20_base::state::{MinterData, TokenInfo, TOKEN_INFO, BALANCES};
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, MintRecieveParams, QueryMsg, SwapRecieveParams};
+use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, MintRecieveParams, QueryMsg, AmountOutParams, AmountInParams};
 use num::integer::Roots;
 use std::cmp::min;
 
@@ -57,12 +57,13 @@ pub fn execute(
     match msg {
         ExecuteMsg::Mint(MintRecieveParams) => execute::execute_pool_mint(_deps, _env, _info, MintRecieveParams),
         ExecuteMsg::Burn (BurnRecieveParams) => execute::execute_pool_burn(_deps, _env, _info, BurnRecieveParams),
-        ExecuteMsg::Swap(SwapRecieveParams) => execute:: execute_pool_swap(_deps,_env,_info,SwapRecieveParams),
+        ExecuteMsg::GetAmountOut(AmountOutParams) => execute:: execute_get_amountout(_deps,_env,_info,AmountOutParams),
+        ExecuteMsg::GetAmountIn(AmountInParams) => execute:: execute_get_amountin(_deps,_env,_info,AmountInParams),
     }
 }
 
 pub mod execute {
-    use std::ops::Mul;
+    use std::ops::{Mul, Add, Div, Sub};
 
     use super::*;
     use crate::{msg::{PoolDataResponse, BurnRecieveParams}, ContractError};
@@ -197,19 +198,63 @@ pub mod execute {
         unimplemented!();
     }
 
-    pub fn execute_pool_swap(
+    pub fn execute_get_amountout(
         _deps: DepsMut,
         _env: Env,
         _info: MessageInfo,
-        _msg: SwapRecieveParams,
+        _msg: AmountOutParams,
     )->Result<Response,ContractError>{
+        let amount_in = _msg.amountIn;
+        let reserve_in = _msg.reserveIn;
+        let reserve_out = _msg.reserveOut;
         
-        //1. chck amount0Out and amount1Out should not be zero
-        //2. get  reserves
-        //3. check availaible liquidity amount0Out or  amount1Out should less than reserves
-        //4. transfer token0 and token1 to user if amount0Out and amount1Out more than zero
-        //5. 
-        unimplemented!()
+        //1.check amountIn, reserveIn and reserveOut should not be zero
+        if amount_in.is_zero() {
+            return Err(ContractError::CustomError { val: "InsufficientAmount".to_string() });
+        }
+
+        if reserve_in.is_zero() || reserve_out.is_zero() {
+            return Err(ContractError::CustomError { val: "InsufficientLiquidity".to_string() });
+        }
+
+        let amount_in_with_fee = amount_in.mul(Uint128::from(997u128));
+        let numerator = amount_in_with_fee.mul(reserve_out);
+        let denominator = (reserve_in.mul(Uint128::from(1000u128))).add(amount_in_with_fee);
+        let amountout = numerator.div(denominator);
+
+        Ok(Response::new()
+        .add_attribute("amount_out", amountout.to_string()))
+
+      
+    }
+
+    pub fn execute_get_amountin(
+        _deps: DepsMut,
+        _env: Env,
+        _info: MessageInfo,
+        _msg: AmountInParams,
+    )->Result<Response,ContractError>{
+        let amount_out = _msg.amountOut;
+        let reserve_in = _msg.reserveIn;
+        let reserve_out = _msg.reserveOut;
+        
+        //1.check amountIn, reserveIn and reserveOut should not be zero
+        if amount_out.is_zero() {
+            return Err(ContractError::CustomError { val: "InsufficientAmount".to_string() });
+        }
+
+        if reserve_in.is_zero() || reserve_out.is_zero() {
+            return Err(ContractError::CustomError { val: "InsufficientLiquidity".to_string() });
+        }
+
+        let numerator = amount_out.mul(Uint128::from(1000u128)).mul(reserve_out);
+        let denominator = reserve_out.sub(amount_out).mul(Uint128::from(997u128));
+        let amountin = numerator.div(denominator).add(Uint128::from(1u128));
+
+        Ok(Response::new()
+        .add_attribute("amount_in", amountin.to_string()))
+
+      
     }
 }
 
