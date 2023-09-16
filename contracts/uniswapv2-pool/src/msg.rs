@@ -24,7 +24,6 @@ pub enum ExecuteMsg {
     MintLpToken { recipient:String  ,amount: Uint128 },
     IncreaseAllowance { spender:String, amount:Uint128, expires:Option<Expiration>},
     Transfer { owner:String, recipient:String  ,amount: Uint128  },
-
 }
 
 /// Message type for `migrate` entry_point
