@@ -1,6 +1,6 @@
 use cosmwasm_std::Uint128;
 use cw_storage_plus::{Item, Map};
-use serde::{Serialize, Deserialize};
+use cosmwasm_schema::cw_serde;
 
 // VAULT_OWNER is used to store the address of the vault owner in the state.
 pub const VAULT_OWNER: Item<String> = Item::new("vault_owner");
@@ -32,7 +32,7 @@ pub const FACTORY_REGISTER: Map<String, bool> = Map::new("factory_register");
  * - `lp_token_contract`: The address of the CW20 contract responsible for minting LP (Liquidity Provider) tokens
  *    when users provide liquidity to the pool.
  */
-#[derive(Serialize, Deserialize)]
+#[cw_serde]
 pub struct PoolData {
     pub registered: bool,
     pub token0: String,
