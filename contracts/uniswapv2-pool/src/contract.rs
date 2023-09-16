@@ -15,8 +15,6 @@ use crate::msg::{
 use num::integer::Roots;
 use std::cmp::min;
 
-use self::query::{query_get_amountout, query_get_amountin};
-
 const CONTRACT_NAME: &str = "crates.io:uniswapv2-pool";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -63,29 +61,35 @@ pub fn execute(
         ExecuteMsg::Mint(MintRecieveParams) => {
             execute::execute_pool_mint(_deps, _env, _info, MintRecieveParams)
         }
-        ExecuteMsg::Burn(BurnRecieveParams) => {
-            execute::execute_pool_burn(_deps, _env, _info, BurnRecieveParams)
-        }
+        ExecuteMsg::Burn {} => execute::execute_pool_burn(_deps, _env, _info),
         ExecuteMsg::BurnLpToken { amount } => {
             execute::execute_burn_lptokens(_deps, _env, _info, amount)
         }
         ExecuteMsg::MintLpToken { recipient, amount } => {
             execute::execute_mint_lptokens(_deps, _env, _info, recipient, amount)
         }
-        
+        ExecuteMsg::Transfer {
+            owner,
+            recipient,
+            amount,
+        } => execute::execute_transfer_lptoken(_deps, _env, _info, owner, recipient, amount),
+        ExecuteMsg::IncreaseAllowance {
+            spender,
+            amount,
+            expires,
+        } => execute::execute_increase_allowance(_deps, _env, _info, spender, amount, expires),
     }
 }
 
 pub mod execute {
 
-    use std::ops::Mul;
+    use std::ops::{Mul, Sub};
 
     use super::*;
-    use crate::{
-        msg::{BurnRecieveParams, PoolDataResponse},
-        ContractError,
-    };
-    use cosmwasm_std::{QueryRequest, StdError, WasmQuery, WasmMsg};
+    use crate::msg::PoolDataResponse;
+    use cosmwasm_std::{QueryRequest, WasmMsg, WasmQuery};
+    use cw20::Expiration;
+    use cw20_base::allowances::execute_transfer_from;
 
     // mint functionality
     pub fn execute_pool_mint(
@@ -97,12 +101,12 @@ pub mod execute {
         // 1. first we need how much token0 and token1 has in specific pool contract.
         // 2. we need token0 and token1 reserve in sorted order
         // 3. find amount deposite
-        let pool_data: Result<PoolDataResponse, StdError> =
+        let pool_data: Result<PoolDataResponse, _> =
             match _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
                 contract_addr: _info.sender.to_string(),
                 msg: to_binary(&query_pool_data {
-                    address:_info.sender.to_string()
-                 })?,
+                    address: _info.sender.to_string(),
+                })?,
             })) {
                 Ok(data) => Ok(data),
                 Err(_) => {
@@ -123,8 +127,11 @@ pub mod execute {
         let liquidity;
         if total_supply.is_zero() {
             let min_liquidity = Uint128::from(1000);
-            liquidity =
-                Uint128::from(u128::from(amount0.mul(amount1)).sqrt() - u128::from(min_liquidity));
+            liquidity = Uint128::from(
+                u128::from(amount0.mul(amount1))
+                    .sqrt()
+                    .sub(u128::from(min_liquidity)),
+            );
             // call into cw20-base to mint tokens to owner, call as self     as no one else is allowed
             match execute_mint(
                 _deps.branch(),
@@ -155,10 +162,13 @@ pub mod execute {
         //         .add_attribute("minted_amount", liquidity),
         //     Err(_) => return Err(ContractError::MintTokenFailed {}),
         // };
-        let mint_execute_tx = WasmMsg::Execute { 
-            contract_addr: _env.contract.address.to_string(), 
-            msg: to_binary(&ExecuteMsg::MintLpToken { recipient: _msg.to, amount: liquidity })?, 
-            funds: vec![]
+        let mint_execute_tx = WasmMsg::Execute {
+            contract_addr: _env.contract.address.to_string(),
+            msg: to_binary(&ExecuteMsg::MintLpToken {
+                recipient: _msg.to,
+                amount: liquidity,
+            })?,
+            funds: vec![],
         };
         Ok(Response::new().add_message(mint_execute_tx));
 
@@ -174,41 +184,29 @@ pub mod execute {
         _deps: DepsMut,
         _env: Env,
         _info: MessageInfo,
-        _msg: BurnRecieveParams,
     ) -> Result<Response, ContractError> {
-        //1.get amount0 and amount1
-        let amount0 = _msg.amount0;
-        let amount1 = _msg.amount1;
-        //2.get liquidity amount to be burned that user have sent to pool
+        //1.get liquidity amount to be burned that user have sent to pool
         let liquidity = match BALANCES.load(_deps.storage, &_env.contract.address) {
             Ok(poolBalance) => poolBalance,
             Err(_) => return Err(ContractError::FetchLiquidityFailed {}),
         };
-        //3. check any amount0 or amount1 should not be zero
-        if amount0.le(&Uint128::from(0u128)) || amount1.le(&Uint128::from(0u128)) {
-            return Err(ContractError::CustomError {
-                val: " InsufficientLiquidityBurned".to_string(),
-            });
-        }
 
-        //4. burn liquidity from pool
+        //2. burn liquidity from pool
         // match execute_burn(_deps, _env.clone(), _info, liquidity) {
         //     Ok(data) => data.add_attribute("burnt_amount", liquidity),
         //     Err(_) => return Err(ContractError::BurnTokenFailed {}),
         // };
-        let burn_execute_tx = WasmMsg::Execute { 
-            contract_addr: _env.contract.address.to_string(), 
-            msg: to_binary(&ExecuteMsg::BurnLpToken {  amount: liquidity })?, 
-            funds: vec![]
+        let burn_execute_tx = WasmMsg::Execute {
+            contract_addr: _env.contract.address.to_string(),
+            msg: to_binary(&ExecuteMsg::BurnLpToken { amount: liquidity })?,
+            funds: vec![],
         };
         Ok(Response::new().add_message(burn_execute_tx))
 
         //5. transfer amount0 and amount1 to user in vault
         //6. update token balance and pool reserves in sorted order in vault
-        
     }
 
-    
     pub fn execute_mint_lptokens(
         _deps: DepsMut,
         _env: Env,
@@ -232,6 +230,38 @@ pub mod execute {
             Err(_) => return Err(ContractError::BurnTokenFailed {}),
         }
     }
+
+    pub fn execute_transfer_lptoken(
+        _deps: DepsMut,
+        _env: Env,
+        _info: MessageInfo,
+        owner: String,
+        recipient: String,
+        amount: Uint128,
+    ) -> Result<Response, ContractError> {
+        match execute_transfer_from(_deps, _env, _info, owner, recipient, amount) {
+            Ok(data) => Ok(data),
+            Err(_) => return Err(ContractError::BurnTokenFailed {}),
+        }
+    }
+
+    pub fn execute_increase_allowance(
+        _deps: DepsMut,
+        _env: Env,
+        _info: MessageInfo,
+        spender: String,
+        amount: Uint128,
+        expires: Option<Expiration>,
+    ) -> Result<Response, ContractError> {
+        match execute_increase_allowance(_deps, _env, _info, spender, amount, expires) {
+            Ok(data) => Ok(data),
+            Err(_) => {
+                return Err(ContractError::CustomError {
+                    val: "increase allowance failed".to_string(),
+                })
+            }
+        }
+    }
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -239,19 +269,31 @@ pub fn query(_deps: Deps, _env: Env, _info: MessageInfo, msg: QueryMsg) -> StdRe
     match msg {
         QueryMsg::TokenInfo {} => to_binary(&query_token_info(_deps)?),
         QueryMsg::Balance { address } => to_binary(&query_balance(_deps, address)?),
-        QueryMsg::GetAmountOut(AmountOutParams) => to_binary(&query_get_amountout(_deps, _env, _info, AmountOutParams)),
-        QueryMsg::GetAmountIn(AmountInParams) => to_binary(&query_get_amountin(_deps, _env, _info, AmountInParams))
-        // ExecuteMsg::GetAmountOut(AmountOutParams) => {
-        //     execute::execute_get_amountout(_deps, _env, _info, AmountOutParams)
-        // }
-        // ExecuteMsg::GetAmountIn(AmountInParams) => {
-        //     execute::execute_get_amountin(_deps, _env, _info, AmountInParams)
-        // }
+        //TODO - REMOVE QUERY BAL IF NOT USED as we are using BALANCE state
+        QueryMsg::GetAmountOut(AmountOutParams) => to_binary(&query::query_get_amountout(
+            _deps,
+            _env,
+            _info,
+            AmountOutParams,
+        )),
+        QueryMsg::GetAmountIn(AmountInParams) => to_binary(&query::query_get_amountin(
+            _deps,
+            _env,
+            _info,
+            AmountInParams,
+        )),
+        QueryMsg::GetAmountTransferToken {} => {
+            to_binary(&query::get_amount_token_transfer(_deps, _env, _info))
+        }
     }
 }
 
 pub mod query {
-    use std::ops::{Mul, Sub, Div, Add};
+    use std::ops::{Add, Div, Mul, Sub};
+
+    use cosmwasm_std::{QueryRequest, StdError, WasmQuery};
+
+    use crate::msg::{GetAmountTokenTransfer, PoolDataResponse};
 
     use super::*;
 
@@ -306,6 +348,58 @@ pub mod query {
         let amountout = numerator.div(denominator);
 
         Ok(amountout)
+    }
+
+    pub fn get_amount_token_transfer(
+        _deps: Deps,
+        _env: Env,
+        _info: MessageInfo,
+    ) -> Result<GetAmountTokenTransfer, ContractError> {
+        let pool_data: Result<PoolDataResponse, StdError> =
+            match _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                contract_addr: _info.sender.to_string(),
+                msg: to_binary(&query_pool_data {
+                    address: _info.sender.to_string(),
+                })?,
+            })) {
+                Ok(data) => Ok(data),
+                Err(_) => {
+                    return Err(ContractError::FetchReserveFailed {});
+                }
+            };
+
+        let balance0 = match pool_data {
+            Ok(data) => data.reserve0,
+            Err(_) => {
+                return Err(ContractError::CustomError {
+                    val: "Unable to get Reserve0".to_string(),
+                })
+            }
+        };
+
+        let balance1 = match pool_data {
+            Ok(data) => data.reserve1,
+            Err(_) => {
+                return Err(ContractError::CustomError {
+                    val: "Unable to get Reserve1".to_string(),
+                })
+            }
+        };
+
+        let total_supply = match TOKEN_INFO.load(_deps.storage) {
+            Ok(data) => data.total_supply,
+            Err(_) => return Err(ContractError::FetchTotalSupplyFailed {}),
+        };
+
+        let liquidity = match BALANCES.load(_deps.storage, &_env.contract.address) {
+            Ok(poolBalance) => poolBalance,
+            Err(_) => return Err(ContractError::FetchLiquidityFailed {}),
+        };
+
+        let amount0 = (liquidity.mul(balance0)).div(total_supply);
+        let amount1 = (liquidity.mul(balance1)).div(total_supply);
+
+        Ok(GetAmountTokenTransfer { amount0, amount1 })
     }
 }
 

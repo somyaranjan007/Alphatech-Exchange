@@ -1,6 +1,6 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::Uint128;
-use cw20:: {TokenInfoResponse, BalanceResponse};
+use cw20:: {TokenInfoResponse, BalanceResponse, Expiration};
 
 
 /// Message type for `instantiate` entry_point
@@ -19,9 +19,12 @@ pub struct InstantiateMsg {
 #[cw_serde]
 pub enum ExecuteMsg {
     Mint (MintRecieveParams),
-    Burn (BurnRecieveParams),
+    Burn ,
     BurnLpToken { amount: Uint128 },
     MintLpToken { recipient:String  ,amount: Uint128 },
+    IncreaseAllowance { spender:String, amount:Uint128, expires:Option<Expiration>},
+    Transfer { owner:String, recipient:String  ,amount: Uint128  },
+
 }
 
 /// Message type for `migrate` entry_point
@@ -43,6 +46,11 @@ pub enum QueryMsg {
 
     #[returns(Uint128)]
     GetAmountIn (AmountInParams),
+
+    #[returns(GetAmountTokenTransfer)]
+    GetAmountTransferToken
+
+
 }
 
 #[cw_serde]
@@ -58,12 +66,6 @@ pub struct MintRecieveParams {
     pub amount1: Uint128
 }
 
-#[cw_serde]
-pub struct BurnRecieveParams {
-    pub to: String,
-    pub amount0: Uint128,
-    pub amount1: Uint128
-}
 
 #[cw_serde]
 pub struct AmountOutParams{
@@ -78,3 +80,8 @@ pub struct AmountInParams{
     pub reserveOut: Uint128,
 }
 
+#[cw_serde]
+pub struct GetAmountTokenTransfer{
+    pub amount0:Uint128,
+    pub amount1:Uint128
+}
