@@ -37,15 +37,7 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Mint(_data) => execute::execute_minted(_deps, _env)
-    }
-}
 
-pub mod execute {
-    use super::*;
-
-    pub fn execute_minted(_deps: DepsMut, _env: Env) -> Result<Response, ContractError> {
-        todo!()
     }
 }
 
