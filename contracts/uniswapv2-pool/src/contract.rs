@@ -264,7 +264,6 @@ pub mod execute {
     }
 }
 
-
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(_deps: Deps, _env: Env, _info: MessageInfo, msg: QueryMsg) -> StdResult<Binary> {
     match msg {

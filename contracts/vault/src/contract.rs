@@ -7,10 +7,12 @@ use cosmwasm_std::{
 use cw2::set_contract_version;
 
 use crate::error::ContractError;
+
 use crate::msg::{
     AddLiquidityParams, ExecuteMsg, InstantiateMsg, LiquidityAmounts, QueryMsg, RegisterPoolParams,
     RemoveLiquidityParams, SwapTokensParams, TransferFrom, UpdateLiquidiyParams,
 };
+
 use crate::state::{PoolData, FACTORY_REGISTER, POOL_REGISTER, VAULT_OWNER};
 
 const CONTRACT_NAME: &str = "crates.io:vault";
@@ -283,6 +285,8 @@ pub mod execute {
             funds: vec![],
         };
 
+
+
         let execute_update_liquidity = match _update_liquidity(
             _env,
             _pool_address,
@@ -394,7 +398,7 @@ pub mod execute {
             Ok(_data) => {
                 let execute_pool_liquidity = WasmMsg::Execute {
                     contract_addr: _remove_liquidity_params.pool_address.clone(),
-                    msg: to_binary(&TransferFrom {
+                    msg: to_binary(&uniswapv2_pool::msg::ExecuteMsg::Transfer {
                         owner: _info.sender.to_string(),
                         recipient: _remove_liquidity_params.pool_address,
                         amount: _remove_liquidity_params.liquidity,
@@ -405,12 +409,12 @@ pub mod execute {
                 let liquidity_amounts: Result<LiquidityAmounts, _> =
                     _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
                         contract_addr: _remove_liquidity_params.pool_address.clone(),
-                        msg: to_binary(&query_liquidity_amounts)?,
+                        msg: to_binary(&uniswapv2_pool::msg::QueryMsg::GetAmountTransferToken)?,
                     }));
 
                 let liquidity_amount_burn = WasmMsg::Execute {
                     contract_addr: _remove_liquidity_params.pool_address.clone(),
-                    msg: to_binary(&Burn {})?,
+                    msg: to_binary(&uniswapv2_pool::msg::ExecuteMsg::Burn)?,
                     funds: vec![],
                 };
 
@@ -525,9 +529,85 @@ pub mod execute {
         match pool_exist {
             Ok(data) => {
                 if _swap_token_params.token_in == data.token0 {
-                    // let amount_out = _deps.querier.query(@QueryRequest::Wasm(WasmQuery::Smart { contract_addr: _swap_token_params.pool_address, msg: to_binary(&GetAmountOut())? }))
+                    let amount_out: Result<Uint128, _> =
+                        _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                            contract_addr: _swap_token_params.pool_address,
+                            msg: to_binary(&uniswapv2_pool::msg::QueryMsg::GetAmountOut(
+                                uniswapv2_pool::msg::AmountOutParams {
+                                    amountIn: _swap_token_params.amount_in,
+                                    reserveIn: data.reserve0,
+                                    reserveOut: data.reserve1,
+                                },
+                            ))?,
+                        }));
+
+                    match amount_out {
+                        Ok(_amount_out) => {
+                            if _amount_out >= data.reserve1 {
+                                return Err(ContractError::CustomError {
+                                    val: "Insufficient Balance!".to_string(),
+                                });
+                            }
+
+                            let transfer_amount_out = WasmMsg::Execute {
+                                contract_addr: _swap_token_params.token_out,
+                                msg: to_binary(&cw20_base::msg::ExecuteMsg::Transfer {
+                                    recipient: _swap_token_params.address_to,
+                                    amount: _amount_out,
+                                })?,
+                                funds: vec![],
+                            };
+
+                            // pending update reserves of pool
+
+                            Ok(Response::new().add_message(transfer_amount_out))
+                        }
+                        Err(_) => {
+                            return Err(ContractError::CustomError {
+                                val: "Unable to find amount out".to_string(),
+                            })
+                        }
+                    }
                 } else {
-                    
+                    let amount_out: Result<Uint128, _> =
+                        _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                            contract_addr: _swap_token_params.pool_address,
+                            msg: to_binary(&uniswapv2_pool::msg::QueryMsg::GetAmountOut(
+                                uniswapv2_pool::msg::AmountOutParams {
+                                    amountIn: _swap_token_params.amount_in,
+                                    reserveIn: data.reserve1,
+                                    reserveOut: data.reserve0,
+                                },
+                            ))?,
+                        }));
+
+                    match amount_out {
+                        Ok(_amount_out) => {
+                            if _amount_out >= data.reserve0 {
+                                return Err(ContractError::CustomError {
+                                    val: "Insufficient Balance!".to_string(),
+                                });
+                            }
+
+                            let transfer_amount_out = WasmMsg::Execute {
+                                contract_addr: _swap_token_params.token_out,
+                                msg: to_binary(&cw20_base::msg::ExecuteMsg::Transfer {
+                                    recipient: _swap_token_params.address_to,
+                                    amount: _amount_out,
+                                })?,
+                                funds: vec![],
+                            };
+
+                            // pending update reserves of pool
+
+                            Ok(Response::new().add_message(transfer_amount_out))
+                        }
+                        Err(_) => {
+                            return Err(ContractError::CustomError {
+                                val: "Unable to find amount out".to_string(),
+                            })
+                        }
+                    }
                 }
             }
             Err(_) => {
