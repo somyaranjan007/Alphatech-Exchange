@@ -1,4 +1,4 @@
-use cosmwasm_std::Uint128;
+use cosmwasm_std::{Uint128, Int128};
 use cw_storage_plus::{Item, Map};
 use cosmwasm_schema::cw_serde;
 
@@ -49,3 +49,11 @@ pub struct PoolData {
  * containing details about the pool's token pair, reserves, and LP token contract.
  */
 pub const POOL_REGISTER: Map<String, PoolData> = Map::new("pool_register");
+
+
+/**
+ * Uniswap v3 pool
+ * 
+ */
+
+pub const MIN_TICK: Int128 = Int128::from(-887272);
