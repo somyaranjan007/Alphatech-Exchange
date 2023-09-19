@@ -6,11 +6,9 @@ use cw2::set_contract_version;
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 
-// version info for migration info
 const CONTRACT_NAME: &str = "crates.io:testing";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Handling contract instantiation
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
@@ -20,29 +18,16 @@ pub fn instantiate(
 ) -> Result<Response, ContractError> {
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
-    // With `Response` type, it is possible to dispatch message to invoke external logic.
-    // See: https://github.com/CosmWasm/cosmwasm/blob/main/SEMANTICS.md#dispatching-messages
     Ok(Response::new()
         .add_attribute("method", "instantiate")
         .add_attribute("owner", info.sender))
 }
 
-/// Handling contract migration
-/// To make a contract migratable, you need
-/// - this entry_point implemented
-/// - only contract admin can migrate, so admin has to be set at contract initiation time
-/// Handling contract execution
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn migrate(_deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
-    match msg {
-        // Find matched incoming message variant and execute them with your custom logic.
-        //
-        // With `Response` type, it is possible to dispatch message to invoke external logic.
-        // See: https://github.com/CosmWasm/cosmwasm/blob/main/SEMANTICS.md#dispatching-messages
-    }
+    match msg {}
 }
 
-/// Handling contract execution
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     _deps: DepsMut,
@@ -50,89 +35,57 @@ pub fn execute(
     _info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
-    match msg {
-        // Find matched incoming message variant and execute them with your custom logic.
-        //
-        // With `Response` type, it is possible to dispatch message to invoke external logic.
-        // See: https://github.com/CosmWasm/cosmwasm/blob/main/SEMANTICS.md#dispatching-messages
-    }
+    match msg {}
 }
 
-/// Handling contract query
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(_deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
-    match msg {
-        // Find matched incoming message variant and query them your custom logic
-        // and then construct your query response with the type usually defined
-        // `msg.rs` alongside with the query message itself.
-        //
-        // use `cosmwasm_std::to_binary` to serialize query response to json binary.
-    }
+    match msg {}
 }
 
-/// Handling submessage reply.
-/// For more info on submessage and reply, see https://github.com/CosmWasm/cosmwasm/blob/main/SEMANTICS.md#submessages
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn reply(_deps: DepsMut, _env: Env, _msg: Reply) -> Result<Response, ContractError> {
-    // With `Response` type, it is still possible to dispatch message to invoke external logic.
-    // See: https://github.com/CosmWasm/cosmwasm/blob/main/SEMANTICS.md#dispatching-messages
-
     todo!()
 }
 
 #[cfg(test)]
 mod vault_tests {
-    use super::*;
-    use cosmwasm_std::{Addr, Empty,};
-    use cw_multi_test::{App, ContractWrapper, Executor, BankKeeper, Contract};
-    use cosmwasm_std::testing::{ mock_env, MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR };
-    use crate::contract::{ execute, instantiate, query };
-    use crate::msg::*;
+    use cosmwasm_std::{Addr, Empty, Uint128};
+    use cw_multi_test::{App, ContractWrapper, Executor};
 
     #[test]
     fn execute_vault_test() {
+        /* addresses for creating transactions */
+        let vault_owner = Addr::unchecked("vault_owner");
+        let usdc_owner = Addr::unchecked("usdc_owner");
+        let usdc_minter = Addr::unchecked("usdc_minter");
+        let usdt_owner = Addr::unchecked("usdt_owner");
+        let usdt_minter = Addr::unchecked("usdt_minter");
+        let factory_owner = Addr::unchecked("factory_owner");
 
-        fn mock_app() -> App {
-            let env = mock_env();
-            let api = Box::new(MockApi::default());
-            let bank = BankKeeper::new();
+        let liquidity_provider = Addr::unchecked("liquidity_provider");
 
-            struct AppConfig {
-                api: Box<MockApi>,
-                env_block: BlockInfo, // Assuming env.block is of type Block
-                bank: BankKeeper,
-                storage: Box<MockStorage>,
-            }
-
-            let app_config = AppConfig {
-                api,
-                env_block: env.block,
-                bank,
-                storage: Box::new(MockStorage::new()),
-            };
-
-            App::new(|router, api, storage| {
-                
-            }) 
-        }
-
+        /* initializing app */
         let mut app = App::default();
-        let code = ContractWrapper::new(execute, instantiate, query);
+
+        /* vault contract */
+        let code = ContractWrapper::new(
+            vault::contract::execute,
+            vault::contract::instantiate,
+            vault::contract::query,
+        );
         let code_id = app.store_code(Box::new(code));
 
         let vault_contract_address = app
             .instantiate_contract(
                 code_id,
-                Addr::unchecked("vault_owner"),
+                vault_owner.clone(),
                 &Empty {},
                 &[],
-                "Vault Contract",
+                "vault contract",
                 None,
             )
             .unwrap();
-
-        println!("vault contract code id: {}", code_id);
-        println!("vault contract address: {}", vault_contract_address);
 
         // token_a usdc instantiated
         let usdc_code = ContractWrapper::new(
@@ -145,14 +98,14 @@ mod vault_tests {
         let usdc20 = app
             .instantiate_contract(
                 usdc_code_id,
-                Addr::unchecked("usdc owner"),
+                usdc_owner,
                 &cw20_base::msg::InstantiateMsg {
                     name: "usdc".to_string(),
                     symbol: "USDC".to_string(),
                     decimals: 6,
                     initial_balances: vec![],
                     mint: Some(cw20::MinterResponse {
-                        minter: "usdc_executor".to_string(),
+                        minter: "usdc_minter".to_string(),
                         cap: None,
                     }),
                     marketing: None,
@@ -163,15 +116,13 @@ mod vault_tests {
             )
             .unwrap();
 
-        println!("usdc20 contract address: {}", usdc20);
-
-        // Minting 1000 usdt tokens to provier      
+        // Minting 1000 usdt tokens to provier
         let _execute_mint = app.execute_contract(
-            Addr::unchecked("usdc_executor"),
+            usdc_minter.clone(),
             usdc20.clone(),
             &cw20_base::msg::ExecuteMsg::Mint {
-                recipient: "provider".to_string(),
-                amount: Uint128::from(1000u128),
+                recipient: "liquidity_provider".to_string(),
+                amount: Uint128::from(1000000u128),
             },
             &[],
         );
@@ -179,14 +130,12 @@ mod vault_tests {
         let usdc_query: cw20::BalanceResponse = app
             .wrap()
             .query_wasm_smart(
-                usdc20,
+                usdc20.clone(),
                 &cw20_base::msg::QueryMsg::Balance {
-                    address: "provider".to_string(),
+                    address: "liquidity_provider".to_string(),
                 },
             )
             .unwrap();
-
-        println!("provider balance: {:?}", usdc_query);
 
         // token_b usdt instantiated
         let usdt_code = ContractWrapper::new(
@@ -196,18 +145,17 @@ mod vault_tests {
         );
         let usdt_code_id = app.store_code(Box::new(usdt_code));
 
-         
         let usdt20 = app
             .instantiate_contract(
                 usdt_code_id,
-                Addr::unchecked("usdc owner"),
+                usdt_owner,
                 &cw20_base::msg::InstantiateMsg {
                     name: "usdc".to_string(),
                     symbol: "USDC".to_string(),
                     decimals: 6,
                     initial_balances: vec![],
                     mint: Some(cw20::MinterResponse {
-                        minter: "usdt_executor".to_string(),
+                        minter: "usdt_minter".to_string(),
                         cap: None,
                     }),
                     marketing: None,
@@ -218,15 +166,13 @@ mod vault_tests {
             )
             .unwrap();
 
-        println!("usdt20 contract address: {}", usdt20);
-
-        // Minting 1000 usdt tokens to provier            
+        // Minting 1000 usdt tokens to provier
         let _execute_mint = app.execute_contract(
-            Addr::unchecked("usdt_executor"),
+            usdt_minter.clone(),
             usdt20.clone(),
             &cw20_base::msg::ExecuteMsg::Mint {
-                recipient: "provider".to_string(),
-                amount: Uint128::from(1000u128),
+                recipient: "liquidity_provider".to_string(),
+                amount: Uint128::from(1000000u128),
             },
             &[],
         );
@@ -234,17 +180,271 @@ mod vault_tests {
         let usdt_query: cw20::BalanceResponse = app
             .wrap()
             .query_wasm_smart(
-                usdt20,
+                usdt20.clone(),
                 &cw20_base::msg::QueryMsg::Balance {
-                    address: "provider".to_string(),
+                    address: "liquidity_provider".to_string(),
                 },
             )
             .unwrap();
 
-        println!("provider balance: {:?}", usdt_query);
+        println!("usdt query: {:?}", usdt_query);
 
-        // Providing Liquiity to vault
+        /* Instantiating Factory Contract */
 
-        let factory_code = ContractWrapper::new()
+        // pool contract code and code_id
+        let pool_code = ContractWrapper::new(
+            uniswapv2_pool::contract::execute,
+            uniswapv2_pool::contract::instantiate,
+            uniswapv2_pool::contract::query,
+        );
+
+        let pool_code_id = app.store_code(Box::new(pool_code));
+
+        let factory_code = ContractWrapper::new(
+            factory::contract::execute,
+            factory::contract::instantiate,
+            factory::contract::query,
+        );
+
+        let factory_code_with_reply = factory_code.with_reply(factory::contract::reply);
+
+        let factory_code_id = app.store_code(Box::new(factory_code_with_reply));
+
+        let factory_contract_address = app
+            .instantiate_contract(
+                factory_code_id,
+                factory_owner.clone(),
+                &factory::msg::InstantiateMsg {
+                    pool_contact_code_id: pool_code_id,
+                    vault_contract: vault_contract_address.to_string().clone(),
+                },
+                &[],
+                "factory contract",
+                None,
+            )
+            .unwrap();
+
+        println!("factory contract code id: {}", factory_code_id);
+        println!("factory contract address: {}", factory_contract_address);
+
+        // factory register
+        let execute_register_factory = app
+            .execute_contract(
+                vault_owner.clone(),
+                vault_contract_address.clone(),
+                &vault::msg::ExecuteMsg::RegisterFactory {
+                    factory_address: factory_contract_address.to_string().clone(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        // factory execute creating pool
+        let execute_create_pool_tx = app.execute_contract(
+            Addr::unchecked("fac"),
+            factory_contract_address,
+            &factory::msg::ExecuteMsg::CreatePool {
+                token_a: usdc20.to_string(),
+                token_b: usdt20.to_string(),
+            },
+            &[],
+        );
+
+        // println!("exe: {:?}", execute_create_pool_tx);
+
+        match execute_create_pool_tx {
+            Ok(data) => {
+                let wasm = data.events.iter().find(|ev| {
+                    ev.ty == "wasm"
+                        && ev
+                            .attributes
+                            .iter()
+                            .any(|attr| attr.key == "pool_contract_address")
+                });
+
+                match wasm {
+                    Some(_data) => {
+                        let attr = _data
+                            .attributes
+                            .iter()
+                            .find(|at| at.key == "pool_contract_address");
+                        match attr {
+                            Some(data) => {
+                                let _execute_approve_to_vault_usdc = app
+                                    .execute_contract(
+                                        liquidity_provider.clone(),
+                                        usdc20.clone(),
+                                        &cw20_base::msg::ExecuteMsg::IncreaseAllowance {
+                                            spender: vault_contract_address.to_string().clone(),
+                                            amount: Uint128::from(10000u128),
+                                            expires: None,
+                                        },
+                                        &[],
+                                    )
+                                    .unwrap();
+
+                                let _execute_approve_to_vault_usdt = app
+                                    .execute_contract(
+                                        liquidity_provider.clone(),
+                                        usdt20.clone(),
+                                        &cw20_base::msg::ExecuteMsg::IncreaseAllowance {
+                                            spender: vault_contract_address.to_string().clone(),
+                                            amount: Uint128::from(10000u128),
+                                            expires: None,
+                                        },
+                                        &[],
+                                    )
+                                    .unwrap();
+
+                                // println!(
+                                //     "_execute_approve_to_vault_usdc : {:?}",
+                                //     _execute_approve_to_vault_usdc
+                                // );
+                                // println!(
+                                //     "_execute_approve_to_vault_usdt : {:?}",
+                                //     _execute_approve_to_vault_usdt
+                                // );
+
+                                let execute_add_liquidity = app
+                                    .execute_contract(
+                                        liquidity_provider.clone(),
+                                        vault_contract_address.clone(),
+                                        &vault::msg::ExecuteMsg::AddLiquidity(
+                                            vault::msg::AddLiquidityParams {
+                                                pool_address: data.value.to_string().clone(),
+                                                token_a: usdc20.to_string().clone(),
+                                                token_b: usdt20.to_string().clone(),
+                                                amount_a_desired: Uint128::from(10000u128),
+                                                amount_b_desired: Uint128::from(9000u128),
+                                                amount_a_min: Uint128::from(9999u128),
+                                                amount_b_min: Uint128::from(8999u128),
+                                                address_to: liquidity_provider.to_string().clone(),
+                                                deadline: Uint128::from(1u128),
+                                            },
+                                        ),
+                                        &[],
+                                    )
+                                    .unwrap();
+                                println!("addrs - {}", data.value.to_string().clone());
+
+                                let query_add_liquidity: Result<vault::state::PoolData, _> =
+                                    app.wrap().query_wasm_smart(
+                                        vault_contract_address.clone(),
+                                        &vault::msg::QueryMsg::QueryPoolData {
+                                            pool_address: data.value.to_string().clone(),
+                                        },
+                                    );
+
+                                println!("return {:?}", query_add_liquidity);
+
+                                let _execute_approve_to_vault_usdc = app
+                                    .execute_contract(
+                                        liquidity_provider.clone(),
+                                        usdc20.clone(),
+                                        &cw20_base::msg::ExecuteMsg::IncreaseAllowance {
+                                            spender: vault_contract_address.to_string().clone(),
+                                            amount: Uint128::from(10000u128),
+                                            expires: None,
+                                        },
+                                        &[],
+                                    )
+                                    .unwrap();
+
+                                let _execute_approve_to_vault_usdt = app
+                                    .execute_contract(
+                                        liquidity_provider.clone(),
+                                        usdt20.clone(),
+                                        &cw20_base::msg::ExecuteMsg::IncreaseAllowance {
+                                            spender: vault_contract_address.to_string().clone(),
+                                            amount: Uint128::from(9000u128),
+                                            expires: None,
+                                        },
+                                        &[],
+                                    )
+                                    .unwrap();
+
+                                let execute_add_liquidity = app
+                                    .execute_contract(
+                                        liquidity_provider.clone(),
+                                        vault_contract_address.clone(),
+                                        &vault::msg::ExecuteMsg::AddLiquidity(
+                                            vault::msg::AddLiquidityParams {
+                                                pool_address: data.value.to_string().clone(),
+                                                token_a: usdt20.to_string().clone(),
+                                                token_b: usdc20.to_string().clone(),
+                                                amount_a_desired: Uint128::from(9000u128),
+                                                amount_b_desired: Uint128::from(10000u128),
+                                                amount_a_min: Uint128::from(100u128),
+                                                amount_b_min: Uint128::from(100u128),
+                                                address_to: liquidity_provider.to_string().clone(),
+                                                deadline: Uint128::from(1u128),
+                                            },
+                                        ),
+                                        &[],
+                                    )
+                                    .unwrap();
+                                println!("addrs - {}", data.value.to_string().clone());
+
+                                let query_add_liquidity: Result<vault::state::PoolData, _> =
+                                    app.wrap().query_wasm_smart(
+                                        vault_contract_address.clone(),
+                                        &vault::msg::QueryMsg::QueryPoolData {
+                                            pool_address: data.value.to_string().clone(),
+                                        },
+                                    );
+
+                                println!("return 2: {:?}", query_add_liquidity);
+
+                                let query_user_lp_balance: Result<cw20::BalanceResponse, _> =
+                                    app.wrap().query_wasm_smart(
+                                        data.value.to_string().clone(),
+                                        &uniswapv2_pool::msg::QueryMsg::Balance {
+                                            address: liquidity_provider.to_string().clone(),
+                                        },
+                                    );
+                                println!(
+                                    "query_user_lp_balance: {:?}",
+                                    query_user_lp_balance.unwrap()
+                                );
+
+                                // let execute_remove_liquidity = app.execute_contract(
+                                //     liquidity_provider.clone(),
+                                //     vault_contract_address.clone(),
+                                //     &vault::msg::ExecuteMsg::RemoveLiquidity(
+                                //         vault::msg::RemoveLiquidityParams {
+                                //             pool_address: data.value.to_string().clone(),
+                                //             token_a: usdc20.to_string().clone(),
+                                //             token_b: usdt20.to_string().clone(),
+                                //             liquidity: Uint128::from(10000u128),
+                                //             amount_a_min: Uint128::from(999u128),
+                                //             amount_b_min: Uint128::from(899u128),
+                                //             address_to: liquidity_provider.to_string().clone(),
+                                //             deadline: Uint128::from(1u128),
+                                //         },
+                                //     ),
+                                //     &[],
+                                // ).unwrap();
+
+                                // let query_add_liquidity: Result<vault::state::PoolData, _> =
+                                //     app.wrap().query_wasm_smart(
+                                //         vault_contract_address.clone(),
+                                //         &vault::msg::QueryMsg::QueryPoolData {
+                                //             pool_address: data.value.to_string().clone(),
+                                //         },
+                                //     );
+
+                                // println!("return 3: {:?}", query_add_liquidity);
+
+                            }
+                            None => panic!("Attribute error"),
+                        }
+                    }
+                    None => println!("NONE"),
+                }
+            }
+            Err(err) => {
+                panic!("Error at execute factory: {}", err)
+            }
+        }
     }
 }

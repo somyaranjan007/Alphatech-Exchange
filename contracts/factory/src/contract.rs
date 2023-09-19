@@ -2,7 +2,7 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     to_binary, Binary, Deps, DepsMut, Empty, Env, MessageInfo, Reply, Response, StdResult, SubMsg,
-    WasmMsg
+    WasmMsg,
 };
 use cw0::parse_reply_instantiate_data;
 use cw2::set_contract_version;
@@ -72,21 +72,16 @@ pub mod execute {
         if _token_a == _token_b {
             return Err(ContractError::IdenticalAddresses {});
         }
-    
-        let (token0, token1) = if _token_a > _token_b {
-            (_token_b, _token_a)
-        } else {
-            (_token_a, _token_b)
-        };
-    
-        if token0 == String::from("") {
+
+        let (token0, token1) = (_token_a, _token_b);
+
+        if token0 == String::from("") && token1 == String::from("") {
             return Err(ContractError::EmptyAddresses {});
         }
-    
+
         let fetch_factory_data = FACTORY_DATA.load(_deps.storage);
         match fetch_factory_data {
             Ok(data) => {
-    
                 let update_factory = FACTORY_DATA.update(
                     _deps.storage,
                     |mut factory_data| -> StdResult<FactoryData> {
@@ -95,14 +90,13 @@ pub mod execute {
                         Ok(factory_data)
                     },
                 );
-    
+
                 match update_factory {
                     Ok(_) => {
-                        
                         let pool_instantiate_tx = WasmMsg::Instantiate {
                             admin: None,
                             code_id: data.pool_contract_code_id,
-                            msg: to_binary(&PoolInstantiateMsg {
+                            msg: to_binary(&uniswapv2_pool::msg::InstantiateMsg {
                                 name: String::from("pool_lp"),
                                 symbol: String::from("POOL_LP"),
                                 decimals: 18,
@@ -110,12 +104,12 @@ pub mod execute {
                             funds: vec![],
                             label: "pool_contract".to_string(),
                         };
-    
+
                         const POOL_INSTANTIATE_TX_ID: u64 = 1u64;
-    
-                        let submessage: SubMsg<Empty> =
+
+                        let submessage =
                             SubMsg::reply_on_success(pool_instantiate_tx, POOL_INSTANTIATE_TX_ID);
-    
+
                         Ok(Response::new()
                             .add_submessage(submessage)
                             .add_attribute("function", "execute_create_pool"))
@@ -126,9 +120,7 @@ pub mod execute {
             Err(_) => return Err(ContractError::FactoryDataFetchError {}),
         }
     }
-
 }
-
 
 /// Handling contract query
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -150,29 +142,33 @@ pub fn handle_pool_instantiate(_deps: DepsMut, _msg: Reply) -> Result<Response, 
 
     match res {
         Ok(data) => {
-
             let fetch_factory_data = FACTORY_DATA.load(_deps.storage);
-            
+
             match fetch_factory_data {
                 Ok(factory_data) => {
-
                     let register_pool_params = vault::msg::RegisterPoolParams {
                         pool_address: data.contract_address,
-                        token0: factory_data.token0.unwrap(),
-                        token1: factory_data.token1.unwrap()
+                        token0: match factory_data.token0 {
+                            Some(data) => data,
+                            None => return Err(ContractError::TokenNotFound {})
+                        },
+                        token1: match factory_data.token1 {
+                            Some(data) => data,
+                            None => return Err(ContractError::TokenNotFound {})
+                        },
                     };
 
-                    let vault_execute_tx = WasmMsg::Execute { 
-                        contract_addr: factory_data.vault_contract, 
-                        msg: to_binary(&vault::msg::ExecuteMsg::RegisterPool(register_pool_params))?, 
-                        funds: vec![]
+                    let vault_execute_tx = WasmMsg::Execute {
+                        contract_addr: factory_data.vault_contract,
+                        msg: to_binary(&vault::msg::ExecuteMsg::RegisterPool(
+                            register_pool_params,
+                        ))?,
+                        funds: vec![],
                     };
 
                     Ok(Response::new().add_message(vault_execute_tx))
-                },
-                Err(_) => {
-                    return Err(ContractError::FactoryDataFetchError {  })
                 }
+                Err(_) => return Err(ContractError::FactoryDataFetchError {}),
             }
         }
         Err(_) => return Err(ContractError::ReplyDataError {}),

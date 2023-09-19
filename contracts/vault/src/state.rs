@@ -47,6 +47,8 @@ pub struct PoolData {
  * When a pool contract is registered in the vault contract, all the relevant data is saved in this mapping.
  * The key is the pool contract's address, and the associated value is an instance of the `PoolData` struct,
  * containing details about the pool's token pair, reserves, and LP token contract.
+ * 
+ * note: we are sending pool addresses in the events so that you can find addressess and store them for fetching pool data
  */
 pub const POOL_REGISTER: Map<String, PoolData> = Map::new("pool_register");
 

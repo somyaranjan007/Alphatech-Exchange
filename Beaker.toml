@@ -1,1 +1,10 @@
 name = "uniswap"
+
+[networks.testnet]
+chain_id = 'osmo-test-5'
+network_variant = 'Shared'
+grpc_endpoint = 'https://osmosis-testnet-grpc.polkachu.com:12590'
+rpc_endpoint = 'https://rpc.osmotest5.osmosis.zone'
+
+[wasm]
+optimizer_version = '0.12.13'

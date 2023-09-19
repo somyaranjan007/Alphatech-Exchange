@@ -58,7 +58,7 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Mint( mint_recieve_params) => {
+        ExecuteMsg::Mint(mint_recieve_params) => {
             execute::execute_pool_mint(_deps, _env, _info, mint_recieve_params)
         }
         ExecuteMsg::Burn {} => execute::execute_pool_burn(_deps, _env, _info),
@@ -91,8 +91,7 @@ pub mod execute {
     use cosmwasm_std::{QueryRequest, WasmMsg, WasmQuery};
     use cw20::Expiration;
 
-
-    use cw20_base::allowances::{execute_transfer_from, execute_increase_allowance};
+    use cw20_base::allowances::{execute_increase_allowance, execute_transfer_from};
 
     // mint functionality
     pub fn execute_pool_mint(
@@ -112,6 +111,7 @@ pub mod execute {
         let amount1 = _msg.amount1;
 
         let liquidity;
+        let mut min_liquidity_execute = None;
         if total_supply.is_zero() {
             let min_liquidity = Uint128::from(1000u128);
             liquidity = Uint128::from(
@@ -120,10 +120,14 @@ pub mod execute {
                     .sub(u128::from(min_liquidity)),
             );
             // 3. call into cw20-base to mint tokens to owner, call as self as no one else is allowed
-            match execute_mint(_deps, _env.clone(), _info, "0".to_string(), min_liquidity) {
-                Ok(data) => data.add_attribute("minted_to", "adress0x"),
-                Err(_) => return Err(ContractError::MintTokenFailed {}),
-            };
+            min_liquidity_execute = Some(WasmMsg::Execute {
+                contract_addr: _env.contract.address.to_string(),
+                msg: to_binary(&ExecuteMsg::MintLpToken {
+                    recipient: "undefined".to_string(),
+                    amount: min_liquidity,
+                })?,
+                funds: vec![],
+            });
         } else {
             // 4. first we need how much token0 and token1 has in specific pool contract.
             // 5. we need token0 and token1 reserve in sorted order
@@ -167,7 +171,12 @@ pub mod execute {
             })?,
             funds: vec![],
         };
-        Ok(Response::new().add_message(mint_execute_tx))
+
+        if total_supply.is_zero() {
+            Ok(Response::new().add_message(min_liquidity_execute.unwrap()).add_message(mint_execute_tx))
+        } else {
+            Ok(Response::new().add_message(mint_execute_tx))
+        }
 
         //8. update new reserve of token0 and token1
         // _update(balance0, balance1);  this will be updated from vault contract
@@ -235,7 +244,7 @@ pub mod execute {
     ) -> Result<Response, ContractError> {
         match execute_transfer_from(_deps, _env, _info, owner, recipient, amount) {
             Ok(data) => Ok(data),
-            Err(_) => return Err(ContractError::BurnTokenFailed {}),
+            Err(_) => return Err(ContractError::BurnTokenFailed {}), //change error
         }
     }
 
@@ -259,26 +268,20 @@ pub mod execute {
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(_deps: Deps, _env: Env, _info: MessageInfo, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(_deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::TokenInfo {} => to_binary(&query_token_info(_deps)?),
         QueryMsg::Balance { address } => to_binary(&query_balance(_deps, address)?),
         //TODO - REMOVE QUERY BAL IF NOT USED as we are using BALANCE state
-        QueryMsg::GetAmountOut(amount_out_params) => to_binary(&query::query_get_amountout(
-            _deps,
-            _env,
-            _info,
-            amount_out_params,
-        )),
-        QueryMsg::GetAmountIn(amount_in_params) => to_binary(&query::query_get_amountin(
-            _deps,
-            _env,
-            _info,
-            amount_in_params,
-        )),
-        QueryMsg::GetAmountTransferToken {} => {
-            to_binary(&query::get_amount_token_transfer(_deps, _env, _info))
+        QueryMsg::GetAmountOut(amount_out_params) => {
+            to_binary(&query::query_get_amountout(_deps, _env, amount_out_params)?)
         }
+        QueryMsg::GetAmountIn(amount_in_params) => {
+            to_binary(&query::query_get_amountin(_deps, _env, amount_in_params)?)
+        }
+        QueryMsg::GetAmountTransferToken { vault_address } => to_binary(
+            &query::get_amount_token_transfer(_deps, _env, vault_address)?
+        ),
     }
 }
 
@@ -294,20 +297,21 @@ pub mod query {
     pub fn query_get_amountin(
         _deps: Deps,
         _env: Env,
-        _info: MessageInfo,
         _msg: AmountInParams,
-    ) -> Result<Uint128, ContractError> {
+    ) -> StdResult<Uint128> {
         let amount_out = _msg.amountOut;
         let reserve_in = _msg.reserveIn;
         let reserve_out = _msg.reserveOut;
 
         //1.check amountIn, reserveIn and reserveOut should not be zero
         if amount_out.is_zero() {
-            return Err(ContractError::InsufficientAmount {});
+            return Err(cosmwasm_std::StdError::GenericErr { msg: "InsufficientAmount".to_string() });
+            
         }
 
         if reserve_in.is_zero() || reserve_out.is_zero() {
-            return Err(ContractError::InsufficientLiquidity {});
+            return Err(cosmwasm_std::StdError::GenericErr { msg: "InsufficientLiquidity".to_string() });
+            
         }
 
         let numerator = amount_out.mul(Uint128::from(1000u128)).mul(reserve_out);
@@ -320,20 +324,20 @@ pub mod query {
     pub fn query_get_amountout(
         _deps: Deps,
         _env: Env,
-        _info: MessageInfo,
         _msg: AmountOutParams,
-    ) -> Result<Uint128, ContractError> {
+    ) -> StdResult<Uint128> {
         let amount_in = _msg.amountIn;
         let reserve_in = _msg.reserveIn;
         let reserve_out = _msg.reserveOut;
 
         //1.check amountIn, reserveIn and reserveOut should not be zero
         if amount_in.is_zero() {
-            return Err(ContractError::InsufficientAmount {});
+            return Err(cosmwasm_std::StdError::GenericErr { msg: "InsufficientAmount".to_string() });
+            
         }
 
         if reserve_in.is_zero() || reserve_out.is_zero() {
-            return Err(ContractError::InsufficientLiquidity {});
+            return Err(cosmwasm_std::StdError::GenericErr { msg: "InsufficientLiquidity".to_string() });
         }
 
         let amount_in_with_fee = amount_in.mul(Uint128::from(997u128));
@@ -347,11 +351,11 @@ pub mod query {
     pub fn get_amount_token_transfer(
         _deps: Deps,
         _env: Env,
-        _info: MessageInfo,
-    ) -> Result<GetAmountTokenTransfer, ContractError> {
+        _vault_address: String,
+    ) -> StdResult<GetAmountTokenTransfer> {
         let pool_data: Result<PoolDataResponse, _> =
             _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                contract_addr: _info.sender.to_string(),
+                contract_addr: _vault_address,
                 msg: to_binary(&VaultMsgEnums::QueryPoolData {
                     pool_address: _env.contract.address.to_string(),
                 })?,
@@ -359,25 +363,25 @@ pub mod query {
 
         let (balance0, balance1) = match pool_data {
             Ok(data) => (data.reserve0, data.reserve1),
-            Err(_) => {
-                return Err(ContractError::QueryFailed {})
-            }
+            Err(_) => return Err(cosmwasm_std::StdError::GenericErr { msg: "QueryFailed".to_string() })
         };
 
         let total_supply = match TOKEN_INFO.load(_deps.storage) {
             Ok(data) => data.total_supply,
-            Err(_) => return Err(ContractError::FetchTotalSupplyFailed {}),
+            Err(_) => return Err(cosmwasm_std::StdError::GenericErr { msg: "FetchTotalSupplyFailed".to_string() })
         };
 
         let liquidity = match BALANCES.load(_deps.storage, &_env.contract.address) {
             Ok(pool_balance) => pool_balance,
-            Err(_) => return Err(ContractError::FetchLiquidityFailed {}),
-        };
+            Err(_) => return Err(cosmwasm_std::StdError::GenericErr { msg: "FetchLiquidityFailed".to_string() })
+        };  // error is here
+
+        // let liquidity= Uint128::from(1u128); 
 
         let amount0 = (liquidity.mul(balance0)).div(total_supply);
         let amount1 = (liquidity.mul(balance1)).div(total_supply);
 
-        Ok(GetAmountTokenTransfer { amount0, amount1 })
+        Ok(GetAmountTokenTransfer { amount_a:amount0, amount_b:amount1 })
     }
 }
 

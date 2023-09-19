@@ -27,6 +27,9 @@ pub enum ContractError {
     #[error("Unable to access reply data")]
     ReplyDataError {},
 
+    #[error("Unable to find token")]
+    TokenNotFound {},
+
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },
 

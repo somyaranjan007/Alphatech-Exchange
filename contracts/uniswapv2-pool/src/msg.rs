@@ -59,7 +59,7 @@ pub enum QueryMsg {
     GetAmountIn(AmountInParams),
 
     #[returns(GetAmountTokenTransfer)]
-    GetAmountTransferToken,
+    GetAmountTransferToken { vault_address: String },
 }
 
 #[cw_serde]
@@ -88,6 +88,7 @@ pub struct AmountOutParams {
     pub amountIn: Uint128,
     pub reserveIn: Uint128,
     pub reserveOut: Uint128,
+    
 }
 #[cw_serde]
 pub struct AmountInParams {
@@ -98,6 +99,7 @@ pub struct AmountInParams {
 
 #[cw_serde]
 pub struct GetAmountTokenTransfer {
-    pub amount0: Uint128,
-    pub amount1: Uint128,
+    pub amount_a: Uint128,
+    pub amount_b: Uint128,
+    
 }

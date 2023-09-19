@@ -1,25 +1,27 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::Uint128;
+use cosmwasm_std::{Binary, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::state::PoolData;
 
-/// Message type for `instantiate` entry_point 
+/// Message type for `instantiate` entry_point
 #[cw_serde]
 pub struct InstantiateMsg {}
 
 /// Message type for `execute` entry_point
 #[cw_serde]
 pub enum ExecuteMsg {
-    /** 
+    /**
      * 1. RegisterFactory: This function allows the owner of the vault contract to register a factory contract.
      * Only the owner of the vault contract can call this function.
      *
      * Parameters:
      * - `factory_address`: The address of the factory contract to be registered.
      */
-    RegisterFactory { factory_address: String },
+    RegisterFactory {
+        factory_address: String,
+    },
 
     /**
      * 2. RegisterPool: This function is used to register a pool contract in the vault.
@@ -85,7 +87,7 @@ pub enum ExecuteMsg {
      */
     UpdateReserves(UpdateLiquidiyParams),
 
-    SwapTokens(SwapTokensParams)
+    SwapTokens(SwapTokensParams),
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -128,8 +130,7 @@ pub struct RemoveLiquidityParams {
 pub struct UpdateLiquidiyParams {
     pub pool_address: String,
     pub amount_a: Uint128,
-    pub amount_b: Uint128,
-    pub feature: String
+    pub amount_b: Uint128
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -140,15 +141,14 @@ pub struct SwapTokensParams {
     pub amount_out_min: Uint128,
     pub token_in: String,
     pub token_out: String,
-    pub address_to: String
+    pub address_to: String,
 }
 
 #[cw_serde]
 pub struct LiquidityAmounts {
     pub amount_a: Uint128,
-    pub amount_b: Uint128
+    pub amount_b: Uint128,
 }
-
 
 /// Message type for `query` entry_point
 #[cw_serde]
@@ -174,3 +174,8 @@ pub struct TransferFrom {
 #[cw_serde]
 pub enum MigrateMsg {}
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+pub struct ContractMsg {
+    pub contract_address: String,
+    pub contract_msg: Binary,
+}
