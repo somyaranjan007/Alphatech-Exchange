@@ -50,10 +50,3 @@ pub struct PoolData {
  */
 pub const POOL_REGISTER: Map<String, PoolData> = Map::new("pool_register");
 
-
-/**
- * Uniswap v3 pool
- * 
- */
-
-pub const MIN_TICK: Int128 = Int128::from(-887272);

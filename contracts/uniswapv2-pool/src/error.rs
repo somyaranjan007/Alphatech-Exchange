@@ -31,6 +31,8 @@ pub enum ContractError {
     #[error("Insufficient amount entered")]
     InsufficientAmount {},
     
+    #[error("Unable to query")]
+    QueryFailed {},
 
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },

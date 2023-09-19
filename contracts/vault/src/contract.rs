@@ -10,7 +10,7 @@ use crate::error::ContractError;
 
 use crate::msg::{
     AddLiquidityParams, ExecuteMsg, InstantiateMsg, LiquidityAmounts, QueryMsg, RegisterPoolParams,
-    RemoveLiquidityParams, SwapTokensParams, TransferFrom, UpdateLiquidiyParams,
+    RemoveLiquidityParams, SwapTokensParams, UpdateLiquidiyParams,
 };
 
 use crate::state::{PoolData, FACTORY_REGISTER, POOL_REGISTER, VAULT_OWNER};
@@ -70,7 +70,10 @@ pub fn execute(
 }
 
 pub mod execute {
+    use std::ops::{AddAssign, SubAssign};
+
     use super::*;
+    use cosmwasm_std::Uint128;
 
     pub fn execute_register_factory(
         _deps: DepsMut,
@@ -232,8 +235,8 @@ pub mod execute {
         _amount_b_desired: Uint128,
         _amount_a_min: Uint128,
         _amount_b_min: Uint128,
-        _reserve_a: Uint128,
-        _reserve_b: Uint128,
+        mut _reserve_a: Uint128,
+        mut _reserve_b: Uint128,
         _address_to: String,
     ) -> Result<(WasmMsg, WasmMsg, WasmMsg, WasmMsg), ContractError> {
         let (_amount_a, _amount_b) =
@@ -285,13 +288,14 @@ pub mod execute {
             funds: vec![],
         };
 
-
+        _reserve_a.add_assign(_amount_a);
+        _reserve_b.add_assign(_amount_b);
 
         let execute_update_liquidity = match _update_liquidity(
             _env,
             _pool_address,
-            _amount_a,
-            _amount_b,
+            _reserve_a,
+            _reserve_b,
             String::from("AddLiquidity"),
         ) {
             Ok(data) => data,
@@ -400,7 +404,7 @@ pub mod execute {
                     contract_addr: _remove_liquidity_params.pool_address.clone(),
                     msg: to_binary(&uniswapv2_pool::msg::ExecuteMsg::Transfer {
                         owner: _info.sender.to_string(),
-                        recipient: _remove_liquidity_params.pool_address,
+                        recipient: _remove_liquidity_params.pool_address.clone(),
                         amount: _remove_liquidity_params.liquidity,
                     })?,
                     funds: vec![],
@@ -424,7 +428,7 @@ pub mod execute {
                             contract_addr: _data.token0,
                             msg: to_binary(&cw20_base::msg::ExecuteMsg::TransferFrom {
                                 owner: _env.contract.address.to_string(),
-                                recipient: _remove_liquidity_params.address_to,
+                                recipient: _remove_liquidity_params.address_to.clone(),
                                 amount: amounts.amount_a,
                             })?,
                             funds: vec![],
@@ -440,11 +444,17 @@ pub mod execute {
                             funds: vec![],
                         };
 
+                        let mut updated_amount_a = _data.reserve0;
+                        let mut updated_amount_b = _data.reserve1;
+
+                        updated_amount_a.sub_assign(amounts.amount_a);
+                        updated_amount_b.sub_assign(amounts.amount_b);
+
                         let execute_update_liquidity = match _update_liquidity(
                             _env,
                             _remove_liquidity_params.pool_address,
-                            amounts.amount_a,
-                            amounts.amount_b,
+                            updated_amount_a,
+                            updated_amount_b,
                             String::from("RemoveLiquidity"),
                         ) {
                             Ok(execute_msg) => execute_msg,
@@ -498,17 +508,8 @@ pub mod execute {
             |pool_data| -> Result<PoolData, ContractError> {
                 match pool_data {
                     Some(mut pool) => {
-                        if _update_liquidity_params.feature == String::from("AddLiquidity") {
-                            pool.reserve0.add_assign(_update_liquidity_params.amount_a);
-                            pool.reserve1.add_assign(_update_liquidity_params.amount_b);
-                        } else if _update_liquidity_params.feature
-                            == String::from("RemoveLiquidity")
-                        {
-                            pool.reserve0.sub_assign(_update_liquidity_params.amount_a);
-                            pool.reserve1.sub_assign(_update_liquidity_params.amount_b);
-                        }
-                        // else for swapping tokens
-
+                        pool.reserve0 = _update_liquidity_params.amount_a;
+                        pool.reserve1 = _update_liquidity_params.amount_b;
                         Ok(pool)
                     }
                     None => return Err(ContractError::PoolNotExisted {}),
@@ -525,97 +526,130 @@ pub mod execute {
         _info: MessageInfo,
         _swap_token_params: SwapTokensParams,
     ) -> Result<Response, ContractError> {
-        let pool_exist = POOL_REGISTER.load(_deps.storage, _swap_token_params.pool_address);
+        let pool_exist = POOL_REGISTER.load(_deps.storage, _swap_token_params.pool_address.clone());
         match pool_exist {
-            Ok(data) => {
-                if _swap_token_params.token_in == data.token0 {
-                    let amount_out: Result<Uint128, _> =
-                        _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                            contract_addr: _swap_token_params.pool_address,
-                            msg: to_binary(&uniswapv2_pool::msg::QueryMsg::GetAmountOut(
-                                uniswapv2_pool::msg::AmountOutParams {
-                                    amountIn: _swap_token_params.amount_in,
-                                    reserveIn: data.reserve0,
-                                    reserveOut: data.reserve1,
-                                },
-                            ))?,
-                        }));
+            Ok(mut data) => {
+                let (transfer_amount_tx, update_liquidity_tx) =
+                    if _swap_token_params.token_in == data.token0 {
+                        let amount_out: Result<Uint128, _> =
+                            _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                                contract_addr: _swap_token_params.pool_address.clone(),
+                                msg: to_binary(&uniswapv2_pool::msg::QueryMsg::GetAmountOut(
+                                    uniswapv2_pool::msg::AmountOutParams {
+                                        amountIn: _swap_token_params.amount_in,
+                                        reserveIn: data.reserve0,
+                                        reserveOut: data.reserve1,
+                                    },
+                                ))?,
+                            }));
 
-                    match amount_out {
-                        Ok(_amount_out) => {
-                            if _amount_out >= data.reserve1 {
-                                return Err(ContractError::CustomError {
-                                    val: "Insufficient Balance!".to_string(),
-                                });
+                        match amount_out {
+                            Ok(_amount_out) => {
+                                if _amount_out >= data.reserve1 {
+                                    return Err(ContractError::CustomError {
+                                        val: "Insufficient Balance!".to_string(),
+                                    });
+                                }
+
+                                let transfer_amount_out = WasmMsg::Execute {
+                                    contract_addr: _swap_token_params.token_out,
+                                    msg: to_binary(&cw20_base::msg::ExecuteMsg::Transfer {
+                                        recipient: _swap_token_params.address_to,
+                                        amount: _amount_out,
+                                    })?,
+                                    funds: vec![],
+                                };
+
+                                let mut updated_amount_a = data.reserve0;
+                                let mut updated_amount_b = data.reserve1;
+
+                                updated_amount_a.add_assign(_swap_token_params.amount_in);
+                                updated_amount_b.sub_assign(_amount_out);
+
+                                let execute_update_liquidity = match _update_liquidity(
+                                    _env,
+                                    _swap_token_params.pool_address.clone(),
+                                    updated_amount_a,
+                                    updated_amount_b,
+                                    String::from("RemoveLiquidity"),
+                                ) {
+                                    Ok(execute_msg) => execute_msg,
+                                    Err(_) => return Err(ContractError::UpateLiquidityFailed {}),
+                                };
+
+                                (transfer_amount_out, execute_update_liquidity)
                             }
-
-                            let transfer_amount_out = WasmMsg::Execute {
-                                contract_addr: _swap_token_params.token_out,
-                                msg: to_binary(&cw20_base::msg::ExecuteMsg::Transfer {
-                                    recipient: _swap_token_params.address_to,
-                                    amount: _amount_out,
-                                })?,
-                                funds: vec![],
-                            };
-
-                            // pending update reserves of pool
-
-                            Ok(Response::new().add_message(transfer_amount_out))
-                        }
-                        Err(_) => {
-                            return Err(ContractError::CustomError {
-                                val: "Unable to find amount out".to_string(),
-                            })
-                        }
-                    }
-                } else {
-                    let amount_out: Result<Uint128, _> =
-                        _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                            contract_addr: _swap_token_params.pool_address,
-                            msg: to_binary(&uniswapv2_pool::msg::QueryMsg::GetAmountOut(
-                                uniswapv2_pool::msg::AmountOutParams {
-                                    amountIn: _swap_token_params.amount_in,
-                                    reserveIn: data.reserve1,
-                                    reserveOut: data.reserve0,
-                                },
-                            ))?,
-                        }));
-
-                    match amount_out {
-                        Ok(_amount_out) => {
-                            if _amount_out >= data.reserve0 {
+                            Err(_) => {
                                 return Err(ContractError::CustomError {
-                                    val: "Insufficient Balance!".to_string(),
-                                });
+                                    val: "Unable to find amount out".to_string(),
+                                })
                             }
-
-                            let transfer_amount_out = WasmMsg::Execute {
-                                contract_addr: _swap_token_params.token_out,
-                                msg: to_binary(&cw20_base::msg::ExecuteMsg::Transfer {
-                                    recipient: _swap_token_params.address_to,
-                                    amount: _amount_out,
-                                })?,
-                                funds: vec![],
-                            };
-
-                            // pending update reserves of pool
-
-                            Ok(Response::new().add_message(transfer_amount_out))
                         }
-                        Err(_) => {
-                            return Err(ContractError::CustomError {
-                                val: "Unable to find amount out".to_string(),
-                            })
+                    } else {
+                        let amount_out: Result<Uint128, _> =
+                            _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                                contract_addr: _swap_token_params.pool_address.clone(),
+                                msg: to_binary(&uniswapv2_pool::msg::QueryMsg::GetAmountOut(
+                                    uniswapv2_pool::msg::AmountOutParams {
+                                        amountIn: _swap_token_params.amount_in,
+                                        reserveIn: data.reserve1,
+                                        reserveOut: data.reserve0,
+                                    },
+                                ))?,
+                            }));
+
+                        match amount_out {
+                            Ok(_amount_out) => {
+                                if _amount_out >= data.reserve0 {
+                                    return Err(ContractError::CustomError {
+                                        val: "Insufficient Balance!".to_string(),
+                                    });
+                                }
+
+                                let transfer_amount_out = WasmMsg::Execute {
+                                    contract_addr: _swap_token_params.token_out,
+                                    msg: to_binary(&cw20_base::msg::ExecuteMsg::Transfer {
+                                        recipient: _swap_token_params.address_to,
+                                        amount: _amount_out,
+                                    })?,
+                                    funds: vec![],
+                                };
+
+                                let mut updated_amount_a = data.reserve0;
+                                let mut updated_amount_b = data.reserve1;
+
+                                updated_amount_a.sub_assign(_amount_out);
+                                updated_amount_b.add_assign(_swap_token_params.amount_in);
+
+                                let execute_update_liquidity = match _update_liquidity(
+                                    _env,
+                                    _swap_token_params.pool_address,
+                                    updated_amount_a,
+                                    updated_amount_b,
+                                    String::from("RemoveLiquidity"),
+                                ) {
+                                    Ok(execute_msg) => execute_msg,
+                                    Err(_) => return Err(ContractError::UpateLiquidityFailed {}),
+                                };
+
+                                (transfer_amount_out, execute_update_liquidity)
+                            }
+                            Err(_) => {
+                                return Err(ContractError::CustomError {
+                                    val: "Unable to find amount out".to_string(),
+                                })
+                            }
                         }
-                    }
-                }
+                    };
+
+                Ok(Response::new()
+                    .add_message(transfer_amount_tx)
+                    .add_message(update_liquidity_tx))
             }
             Err(_) => {
                 return Err(ContractError::PoolNotExisted {});
             }
         }
-
-        todo!()
     }
 }
 
@@ -648,4 +682,148 @@ pub mod query {
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn reply(_deps: DepsMut, _env: Env, _msg: Reply) -> Result<Response, ContractError> {
     todo!()
+}
+
+#[cfg(test)]
+mod vault_tests {
+    use super::*;
+    use cosmwasm_std::{Addr, Empty,};
+    use cw_multi_test::{App, ContractWrapper, Executor, BankKeeper, Contract};
+    use cosmwasm_std::testing::{ mock_env, MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR };
+    use crate::contract::{ execute, instantiate, query };
+    use crate::msg::*;
+
+    #[test]
+    fn execute_vault_test() {
+        let mut app = App::default();
+        let code = ContractWrapper::new(execute, instantiate, query);
+        let code_id = app.store_code(Box::new(code));
+
+        let vault_contract_address = app
+            .instantiate_contract(
+                code_id,
+                Addr::unchecked("vault_owner"),
+                &Empty {},
+                &[],
+                "Vault Contract",
+                None,
+            )
+            .unwrap();
+
+        println!("vault contract code id: {}", code_id);
+        println!("vault contract address: {}", vault_contract_address);
+
+        // token_a usdc instantiated
+        let usdc_code = ContractWrapper::new(
+            cw20_base::contract::execute,
+            cw20_base::contract::instantiate,
+            cw20_base::contract::query,
+        );
+        let usdc_code_id = app.store_code(Box::new(usdc_code));
+
+        let usdc20 = app
+            .instantiate_contract(
+                usdc_code_id,
+                Addr::unchecked("usdc owner"),
+                &cw20_base::msg::InstantiateMsg {
+                    name: "usdc".to_string(),
+                    symbol: "USDC".to_string(),
+                    decimals: 6,
+                    initial_balances: vec![],
+                    mint: Some(cw20::MinterResponse {
+                        minter: "usdc_executor".to_string(),
+                        cap: None,
+                    }),
+                    marketing: None,
+                },
+                &[],
+                "usdc20",
+                None,
+            )
+            .unwrap();
+
+        println!("usdc20 contract address: {}", usdc20);
+
+        // Minting 1000 usdt tokens to provier      
+        let _execute_mint = app.execute_contract(
+            Addr::unchecked("usdc_executor"),
+            usdc20.clone(),
+            &cw20_base::msg::ExecuteMsg::Mint {
+                recipient: "provider".to_string(),
+                amount: Uint128::from(1000u128),
+            },
+            &[],
+        );
+
+        let usdc_query: cw20::BalanceResponse = app
+            .wrap()
+            .query_wasm_smart(
+                usdc20,
+                &cw20_base::msg::QueryMsg::Balance {
+                    address: "provider".to_string(),
+                },
+            )
+            .unwrap();
+
+        println!("provider balance: {:?}", usdc_query);
+
+        // token_b usdt instantiated
+        let usdt_code = ContractWrapper::new(
+            cw20_base::contract::execute,
+            cw20_base::contract::instantiate,
+            cw20_base::contract::query,
+        );
+        let usdt_code_id = app.store_code(Box::new(usdt_code));
+
+         
+        let usdt20 = app
+            .instantiate_contract(
+                usdt_code_id,
+                Addr::unchecked("usdc owner"),
+                &cw20_base::msg::InstantiateMsg {
+                    name: "usdc".to_string(),
+                    symbol: "USDC".to_string(),
+                    decimals: 6,
+                    initial_balances: vec![],
+                    mint: Some(cw20::MinterResponse {
+                        minter: "usdt_executor".to_string(),
+                        cap: None,
+                    }),
+                    marketing: None,
+                },
+                &[],
+                "usdc20",
+                None,
+            )
+            .unwrap();
+
+        println!("usdt20 contract address: {}", usdt20);
+
+        // Minting 1000 usdt tokens to provier            
+        let _execute_mint = app.execute_contract(
+            Addr::unchecked("usdt_executor"),
+            usdt20.clone(),
+            &cw20_base::msg::ExecuteMsg::Mint {
+                recipient: "provider".to_string(),
+                amount: Uint128::from(1000u128),
+            },
+            &[],
+        );
+
+        let usdt_query: cw20::BalanceResponse = app
+            .wrap()
+            .query_wasm_smart(
+                usdt20,
+                &cw20_base::msg::QueryMsg::Balance {
+                    address: "provider".to_string(),
+                },
+            )
+            .unwrap();
+
+        println!("provider balance: {:?}", usdt_query);
+
+        // Providing Liquiity to vault
+
+        // let factory_code = ContractWrapper::new()
+    }
 }
