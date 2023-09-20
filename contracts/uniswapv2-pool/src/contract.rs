@@ -173,7 +173,9 @@ pub mod execute {
         };
 
         if total_supply.is_zero() {
-            Ok(Response::new().add_message(min_liquidity_execute.unwrap()).add_message(mint_execute_tx))
+            Ok(Response::new()
+                .add_message(min_liquidity_execute.unwrap())
+                .add_message(mint_execute_tx))
         } else {
             Ok(Response::new().add_message(mint_execute_tx))
         }
@@ -244,7 +246,7 @@ pub mod execute {
     ) -> Result<Response, ContractError> {
         match execute_transfer_from(_deps, _env, _info, owner, recipient, amount) {
             Ok(data) => Ok(data),
-            Err(_) => return Err(ContractError::BurnTokenFailed {}), //change error
+            Err(err) => return Err(ContractError::CustomError { val: err.to_string() } ), 
         }
     }
 
@@ -280,7 +282,7 @@ pub fn query(_deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             to_binary(&query::query_get_amountin(_deps, _env, amount_in_params)?)
         }
         QueryMsg::GetAmountTransferToken { vault_address } => to_binary(
-            &query::get_amount_token_transfer(_deps, _env, vault_address)?
+            &query::get_amount_token_transfer(_deps, _env, vault_address)?,
         ),
     }
 }
@@ -294,24 +296,22 @@ pub mod query {
 
     use super::*;
 
-    pub fn query_get_amountin(
-        _deps: Deps,
-        _env: Env,
-        _msg: AmountInParams,
-    ) -> StdResult<Uint128> {
+    pub fn query_get_amountin(_deps: Deps, _env: Env, _msg: AmountInParams) -> StdResult<Uint128> {
         let amount_out = _msg.amountOut;
         let reserve_in = _msg.reserveIn;
         let reserve_out = _msg.reserveOut;
 
         //1.check amountIn, reserveIn and reserveOut should not be zero
         if amount_out.is_zero() {
-            return Err(cosmwasm_std::StdError::GenericErr { msg: "InsufficientAmount".to_string() });
-            
+            return Err(cosmwasm_std::StdError::GenericErr {
+                msg: "InsufficientAmount".to_string(),
+            });
         }
 
         if reserve_in.is_zero() || reserve_out.is_zero() {
-            return Err(cosmwasm_std::StdError::GenericErr { msg: "InsufficientLiquidity".to_string() });
-            
+            return Err(cosmwasm_std::StdError::GenericErr {
+                msg: "InsufficientLiquidity".to_string(),
+            });
         }
 
         let numerator = amount_out.mul(Uint128::from(1000u128)).mul(reserve_out);
@@ -332,12 +332,15 @@ pub mod query {
 
         //1.check amountIn, reserveIn and reserveOut should not be zero
         if amount_in.is_zero() {
-            return Err(cosmwasm_std::StdError::GenericErr { msg: "InsufficientAmount".to_string() });
-            
+            return Err(cosmwasm_std::StdError::GenericErr {
+                msg: "InsufficientAmount".to_string(),
+            });
         }
 
         if reserve_in.is_zero() || reserve_out.is_zero() {
-            return Err(cosmwasm_std::StdError::GenericErr { msg: "InsufficientLiquidity".to_string() });
+            return Err(cosmwasm_std::StdError::GenericErr {
+                msg: "InsufficientLiquidity".to_string(),
+            });
         }
 
         let amount_in_with_fee = amount_in.mul(Uint128::from(997u128));
@@ -363,25 +366,53 @@ pub mod query {
 
         let (balance0, balance1) = match pool_data {
             Ok(data) => (data.reserve0, data.reserve1),
-            Err(_) => return Err(cosmwasm_std::StdError::GenericErr { msg: "QueryFailed".to_string() })
+            Err(_) => {
+                return Err(cosmwasm_std::StdError::GenericErr {
+                    msg: "QueryFailed".to_string(),
+                })
+            }
         };
 
         let total_supply = match TOKEN_INFO.load(_deps.storage) {
             Ok(data) => data.total_supply,
-            Err(_) => return Err(cosmwasm_std::StdError::GenericErr { msg: "FetchTotalSupplyFailed".to_string() })
+            Err(_) => {
+                return Err(cosmwasm_std::StdError::GenericErr {
+                    msg: "FetchTotalSupplyFailed".to_string(),
+                })
+            }
         };
 
-        let liquidity = match BALANCES.load(_deps.storage, &_env.contract.address) {
-            Ok(pool_balance) => pool_balance,
-            Err(_) => return Err(cosmwasm_std::StdError::GenericErr { msg: "FetchLiquidityFailed".to_string() })
-        };  // error is here
+        // let liquidity = match BALANCES.load(_deps.storage, &_env.contract.address) {
+        //     Ok(pool_balance) => pool_balance,
+        //     Err(_) => return Err(cosmwasm_std::StdError::GenericErr { msg: "FetchLiquidityFailed".to_string() })
+        // };
 
-        // let liquidity= Uint128::from(1u128); 
+        let balance_response: Result<cw20::BalanceResponse, _> =
+            _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                contract_addr: _env.contract.address.to_string(),
+                msg: to_binary(&cw20_base::msg::QueryMsg::Balance {
+                    address: _env.contract.address.to_string(),
+                })?,
+            }));
+
+        let liquidity = match balance_response {
+            Ok(data) => data.balance,
+            Err(_) => {
+                return Err(cosmwasm_std::StdError::GenericErr {
+                    msg: "unable to fetch".to_string(),
+                });
+            }
+        };
+
+        // let liquidity= Uint128::from(1u128);
 
         let amount0 = (liquidity.mul(balance0)).div(total_supply);
         let amount1 = (liquidity.mul(balance1)).div(total_supply);
 
-        Ok(GetAmountTokenTransfer { amount_a:amount0, amount_b:amount1 })
+        Ok(GetAmountTokenTransfer {
+            amount_a: amount0,
+            amount_b: amount1,
+        })
     }
 }
 

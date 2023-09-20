@@ -4,7 +4,7 @@ use cosmwasm_schema::{cw_serde, QueryResponses};
 #[cw_serde]
 pub struct InstantiateMsg {
     // A field to specify the code ID of the pool contract
-    pub pool_contact_code_id: u64,
+    pub pool_contract_code_id: u64,
 
     // A field to specify the address of the vault contract
     pub vault_contract: String

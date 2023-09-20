@@ -74,6 +74,7 @@ mod vault_tests {
             vault::contract::instantiate,
             vault::contract::query,
         );
+
         let code_id = app.store_code(Box::new(code));
 
         let vault_contract_address = app
@@ -116,7 +117,7 @@ mod vault_tests {
             )
             .unwrap();
 
-        // Minting 1000 usdt tokens to provier
+        // Minting 1000 usdt tokens to provider
         let _execute_mint = app.execute_contract(
             usdc_minter.clone(),
             usdc20.clone(),
@@ -127,7 +128,7 @@ mod vault_tests {
             &[],
         );
 
-        let usdc_query: cw20::BalanceResponse = app
+        let usdc_query0: cw20::BalanceResponse = app
             .wrap()
             .query_wasm_smart(
                 usdc20.clone(),
@@ -215,7 +216,7 @@ mod vault_tests {
                 factory_code_id,
                 factory_owner.clone(),
                 &factory::msg::InstantiateMsg {
-                    pool_contact_code_id: pool_code_id,
+                    pool_contract_code_id: pool_code_id,
                     vault_contract: vault_contract_address.to_string().clone(),
                 },
                 &[],
@@ -407,23 +408,37 @@ mod vault_tests {
                                     query_user_lp_balance.unwrap()
                                 );
 
-                                // let execute_remove_liquidity = app.execute_contract(
-                                //     liquidity_provider.clone(),
-                                //     vault_contract_address.clone(),
-                                //     &vault::msg::ExecuteMsg::RemoveLiquidity(
-                                //         vault::msg::RemoveLiquidityParams {
-                                //             pool_address: data.value.to_string().clone(),
-                                //             token_a: usdc20.to_string().clone(),
-                                //             token_b: usdt20.to_string().clone(),
-                                //             liquidity: Uint128::from(10000u128),
-                                //             amount_a_min: Uint128::from(999u128),
-                                //             amount_b_min: Uint128::from(899u128),
-                                //             address_to: liquidity_provider.to_string().clone(),
-                                //             deadline: Uint128::from(1u128),
-                                //         },
-                                //     ),
-                                //     &[],
-                                // ).unwrap();
+                                let _liquidity_allowance = app.execute_contract(
+                                    liquidity_provider.clone(),
+                                    Addr::unchecked(&data.value),
+                                    &uniswapv2_pool::msg::ExecuteMsg::IncreaseAllowance {
+                                        spender: vault_contract_address.to_string().clone(),
+                                        amount: Uint128::from(100u128),
+                                        expires: None,
+                                    },
+                                    &[],
+                                ).unwrap();
+                                
+
+                                let execute_remove_liquidity = app
+                                    .execute_contract(
+                                        liquidity_provider.clone(),
+                                        vault_contract_address.clone(),
+                                        &vault::msg::ExecuteMsg::RemoveLiquidity(
+                                            vault::msg::RemoveLiquidityParams {
+                                                pool_address: data.value.to_string().clone(),
+                                                token_a: usdc20.to_string().clone(),
+                                                token_b: usdt20.to_string().clone(),
+                                                liquidity: Uint128::from(100u128),
+                                                amount_a_min: Uint128::from(999u128),
+                                                amount_b_min: Uint128::from(899u128),
+                                                address_to: liquidity_provider.to_string().clone(),
+                                                deadline: Uint128::from(1u128),
+                                            },
+                                        ),
+                                        &[],
+                                    )
+                                    .unwrap();
 
                                 // let query_add_liquidity: Result<vault::state::PoolData, _> =
                                 //     app.wrap().query_wasm_smart(
@@ -434,7 +449,6 @@ mod vault_tests {
                                 //     );
 
                                 // println!("return 3: {:?}", query_add_liquidity);
-
                             }
                             None => panic!("Attribute error"),
                         }

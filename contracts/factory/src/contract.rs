@@ -27,7 +27,7 @@ pub fn instantiate(
 
     let factory_data = FactoryData {
         vault_contract: _msg.vault_contract,
-        pool_contract_code_id: _msg.pool_contact_code_id,
+        pool_contract_code_id: _msg.pool_contract_code_id,
         token0: None,
         token1: None,
     };
