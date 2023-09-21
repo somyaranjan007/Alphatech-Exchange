@@ -1,19 +1,20 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Binary, Deps, DepsMut, Env, MessageInfo, QueryRequest, Reply, Response, StdError,
-    StdResult, Uint128, WasmMsg, WasmQuery,
+    to_binary, Binary, Deps, DepsMut, Empty, Env, MessageInfo, QueryRequest, Reply, Response,
+    StdError, StdResult, SubMsg, Uint128, WasmMsg, WasmQuery,
 };
 use cw2::set_contract_version;
 
 use crate::error::ContractError;
 
 use crate::msg::{
-    AddLiquidityParams, ContractMsg, ExecuteMsg, InstantiateMsg, LiquidityAmounts, QueryMsg,
-    RegisterPoolParams, RemoveLiquidityParams, SwapTokensParams, UpdateLiquidiyParams,
+    AddLiquidityParams, ContractMsg, ExecuteMsg, ExecutePoolReplyData, InstantiateMsg,
+    LiquidityAmounts, QueryContractCw20Balance, QueryMsg, RegisterPoolParams,
+    RemoveLiquidityParams, SwapTokensParams, UpdateLiquidiyParams,
 };
 
-use crate::state::{PoolData, FACTORY_REGISTER, POOL_REGISTER, VAULT_OWNER};
+use crate::state::{PoolData, FACTORY_REGISTER, POOL_REGISTER, VAULT_OWNER, VAULT_TOKENS_BALANCE};
 
 const CONTRACT_NAME: &str = "crates.io:vault";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -60,9 +61,6 @@ pub fn execute(
         ExecuteMsg::RemoveLiquidity(remove_liquidity_params) => {
             execute::execute_remove_liquidity(_deps, _env, _info, remove_liquidity_params)
         }
-        ExecuteMsg::UpdateReserves(update_liquidiy_params) => {
-            execute::execute_update_liquidity(_deps, _env, _info, update_liquidiy_params)
-        }
         ExecuteMsg::SwapTokens(swap_token_params) => {
             execute::execute_swap_tokens(_deps, _env, _info, swap_token_params)
         }
@@ -70,13 +68,11 @@ pub fn execute(
 }
 
 pub mod execute {
-    use cosmwasm_std::Uint128;
     use std::ops::{AddAssign, SubAssign};
 
     use super::*;
 
-
-    /* internal functions */ 
+    /* internal functions */
     /**
      * 1. execute_wasm_execute: This function generates multiple `Execute` messages to interact with other CosmWasm contracts.
      *
@@ -96,6 +92,27 @@ pub mod execute {
             .collect();
 
         execute_messages
+    }
+
+    fn get_cw20_token_balance(
+        _deps: DepsMut,
+        _query_contract: QueryContractCw20Balance,
+    ) -> cw20::BalanceResponse {
+        let query_cw20_balance: Result<cw20::BalanceResponse, _> =
+            _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                contract_addr: _query_contract.token_contract_address,
+                msg: to_binary(&cw20_base::msg::QueryMsg::Balance {
+                    address: _query_contract.account_address,
+                })
+                .unwrap(),
+            }));
+
+        match query_cw20_balance {
+            Ok(data) => data,
+            Err(_) => cw20::BalanceResponse {
+                balance: Uint128::zero(),
+            },
+        }
     }
 
     fn calculate_amount(
@@ -184,10 +201,7 @@ pub mod execute {
                 }
             };
 
-        _reserve_a.add_assign(_amount_a);
-        _reserve_b.add_assign(_amount_b);
-
-        let execute_wasm_messages = execute_wasm_execute(vec![
+        let execute_messages = execute_wasm_execute(vec![
             ContractMsg {
                 contract_address: _params.token_a,
                 contract_msg: to_binary(&cw20_base::msg::ExecuteMsg::TransferFrom {
@@ -205,7 +219,7 @@ pub mod execute {
                 })?,
             },
             ContractMsg {
-                contract_address: _params.pool_address.clone(),
+                contract_address: _params.pool_address,
                 contract_msg: to_binary(&uniswapv2_pool::msg::ExecuteMsg::Mint(
                     uniswapv2_pool::msg::MintRecieveParams {
                         to: _info.sender.to_string(),
@@ -214,20 +228,12 @@ pub mod execute {
                     },
                 ))?,
             },
-            ContractMsg {
-                contract_address: _env.contract.address.to_string(),
-                contract_msg: to_binary(&ExecuteMsg::UpdateReserves(UpdateLiquidiyParams {
-                    pool_address: _params.pool_address,
-                    amount_a: _reserve_a,
-                    amount_b: _reserve_b,
-                }))?,
-            },
         ]);
 
-        Ok(execute_wasm_messages)
+        Ok(execute_messages)
     }
 
-    /* internal functions */ 
+    /* internal functions */
     pub fn execute_register_factory(
         _deps: DepsMut,
         _env: Env,
@@ -349,7 +355,7 @@ pub mod execute {
                     }
                 };
 
-                let execute_messages = match execute_liquidity(
+                let mut execute_messages = match execute_liquidity(
                     _deps,
                     _env,
                     _info,
@@ -360,7 +366,25 @@ pub mod execute {
                     Ok(messages) => messages,
                     Err(err) => return Err(err),
                 };
-                Ok(Response::new().add_messages(execute_messages))
+
+                let submessage_execute = execute_messages.pop();
+                match submessage_execute {
+                    Some(submessage) => {
+                        const EXECUTE_REPLY_ID: u64 = 1u64;
+
+                        let sub_msg: SubMsg<Empty> =
+                            SubMsg::reply_on_success(submessage, EXECUTE_REPLY_ID);
+
+                        Ok(Response::new()
+                            .add_messages(execute_messages)
+                            .add_submessage(sub_msg))
+                    }
+                    None => {
+                        return Err(ContractError::CustomError {
+                            val: String::from("Unable to pop message"),
+                        })
+                    }
+                }
             }
             Err(_) => return Err(ContractError::FetchPoolDataError {}),
         }
@@ -377,87 +401,46 @@ pub mod execute {
         _info: MessageInfo,
         _remove_liquidity_params: RemoveLiquidityParams,
     ) -> Result<Response, ContractError> {
-        let pool_exist =
-            POOL_REGISTER.load(_deps.storage, _remove_liquidity_params.pool_address.clone());
-
-        match pool_exist {
-            Ok(_data) => {
-                let liquidity_amounts: Result<LiquidityAmounts, _> =
-                    _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                        contract_addr: _remove_liquidity_params.pool_address.clone(),
-                        msg: to_binary(&uniswapv2_pool::msg::QueryMsg::GetAmountTransferToken {
-                            vault_address: _env.contract.address.to_string(),
+        match execute_update_liquidity(
+            _deps,
+            _env,
+            UpdateLiquidiyParams {
+                pool_address: _info.sender.to_string(),
+                amount_a: _remove_liquidity_params.reserve_a,
+                amount_b: _remove_liquidity_params.reserve_b,
+            },
+        ) {
+            Ok(data) => {
+                let _execute_messages = execute_wasm_execute(vec![
+                    ContractMsg {
+                        contract_address: _remove_liquidity_params.token_a,
+                        contract_msg: to_binary(&cw20_base::msg::ExecuteMsg::Transfer {
+                            recipient: _remove_liquidity_params.address_to.clone(),
+                            amount: _remove_liquidity_params.amount_a,
                         })?,
-                    }));
+                    },
+                    ContractMsg {
+                        contract_address: _remove_liquidity_params.token_b,
+                        contract_msg: to_binary(&cw20_base::msg::ExecuteMsg::Transfer {
+                            recipient: _remove_liquidity_params.address_to,
+                            amount: _remove_liquidity_params.amount_b,
+                        })?,
+                    },
+                ]);
 
-                match liquidity_amounts {
-                    Ok(amounts) => {
-                        let mut updated_amount_a = _data.reserve0;
-                        let mut updated_amount_b = _data.reserve1;
-
-                        updated_amount_a.sub_assign(amounts.amount_a);
-                        updated_amount_b.sub_assign(amounts.amount_b);
-
-                        let _execute_messages = execute_wasm_execute(vec![
-                            ContractMsg {
-                                contract_address: _remove_liquidity_params.pool_address.clone(),
-                                contract_msg: to_binary(
-                                    &uniswapv2_pool::msg::ExecuteMsg::Transfer {
-                                        owner: _info.sender.to_string(),
-                                        recipient: _remove_liquidity_params.pool_address.clone(),
-                                        amount: _remove_liquidity_params.liquidity,
-                                    },
-                                )?,
-                            },
-                            ContractMsg {
-                                contract_address: _remove_liquidity_params.pool_address.clone(),
-                                contract_msg: to_binary(&uniswapv2_pool::msg::ExecuteMsg::Burn)?,
-                            },
-                            ContractMsg {
-                                contract_address: _data.token0,
-                                contract_msg: to_binary(
-                                    &cw20_base::msg::ExecuteMsg::TransferFrom {
-                                        owner: _env.contract.address.to_string(),
-                                        recipient: _remove_liquidity_params.address_to.clone(),
-                                        amount: amounts.amount_a,
-                                    },
-                                )?,
-                            },
-                            ContractMsg {
-                                contract_address: _data.token1,
-                                contract_msg: to_binary(
-                                    &cw20_base::msg::ExecuteMsg::TransferFrom {
-                                        owner: _env.contract.address.to_string(),
-                                        recipient: _remove_liquidity_params.address_to,
-                                        amount: amounts.amount_b,
-                                    },
-                                )?,
-                            },
-                            ContractMsg {
-                                contract_address: _env.contract.address.to_string(),
-                                contract_msg: to_binary(&ExecuteMsg::UpdateReserves(
-                                    UpdateLiquidiyParams {
-                                        pool_address: _remove_liquidity_params.pool_address,
-                                        amount_a: updated_amount_a,
-                                        amount_b: updated_amount_b,
-                                    },
-                                ))?,
-                            },
-                        ]);
-
-                        Ok(Response::new().add_messages(_execute_messages))
-                    }
-                    Err(_) => return Err(ContractError::InsufficientLiquidity {}),
-                }
+                Ok(data.add_messages(_execute_messages))
             }
-            Err(_) => return Err(ContractError::PoolNotExisted {}),
+            Err(_) => {
+                return Err(ContractError::CustomError {
+                    val: String::from("Update Reserve failed"),
+                })
+            }
         }
     }
 
     pub fn execute_update_liquidity(
         _deps: DepsMut,
         _env: Env,
-        _info: MessageInfo,
         _update_liquidity_params: UpdateLiquidiyParams,
     ) -> Result<Response, ContractError> {
         let _update_pool_register = POOL_REGISTER.update(
@@ -546,35 +529,44 @@ pub mod execute {
                     }
                 };
 
-                let execute_messages = execute_wasm_execute(vec![
-                    ContractMsg {
-                        contract_address: _swap_token_params.token_out,
-                        contract_msg: to_binary(&cw20_base::msg::ExecuteMsg::Transfer {
-                            recipient: _swap_token_params.address_to,
-                            amount: _amount_out,
-                        })?,
+                match execute_update_liquidity(
+                    _deps,
+                    _env.clone(),
+                    UpdateLiquidiyParams {
+                        pool_address: _swap_token_params.pool_address,
+                        amount_a: updated_amount_a,
+                        amount_b: updated_amount_b,
                     },
-                    ContractMsg {
-                        contract_address: _swap_token_params.token_in,
-                        contract_msg: to_binary(&cw20_base::msg::ExecuteMsg::TransferFrom {
-                            owner: _info.sender.to_string(),
-                            recipient: _env.contract.address.to_string(),
-                            amount: _swap_token_params.amount_in,
-                        })?,
-                    },
-                    ContractMsg {
-                        contract_address: _env.contract.address.to_string(),
-                        contract_msg: to_binary(&ExecuteMsg::UpdateReserves(
-                            UpdateLiquidiyParams {
-                                pool_address: _swap_token_params.pool_address,
-                                amount_a: updated_amount_a,
-                                amount_b: updated_amount_b,
+                ) {
+                    Ok(response) => {
+                        let execute_messages = execute_wasm_execute(vec![
+                            ContractMsg {
+                                contract_address: _swap_token_params.token_out,
+                                contract_msg: to_binary(&cw20_base::msg::ExecuteMsg::Transfer {
+                                    recipient: _swap_token_params.address_to,
+                                    amount: _amount_out,
+                                })?,
                             },
-                        ))?,
-                    },
-                ]);
+                            ContractMsg {
+                                contract_address: _swap_token_params.token_in,
+                                contract_msg: to_binary(
+                                    &cw20_base::msg::ExecuteMsg::TransferFrom {
+                                        owner: _info.sender.to_string(),
+                                        recipient: _env.contract.address.to_string(),
+                                        amount: _swap_token_params.amount_in,
+                                    },
+                                )?,
+                            },
+                        ]);
 
-                Ok(Response::new().add_messages(execute_messages))
+                        Ok(response.add_messages(execute_messages))
+                    }
+                    Err(_) => {
+                        return Err(ContractError::CustomError {
+                            val: String::from("Update Reserve failed"),
+                        })
+                    }
+                }
             }
             Err(_) => {
                 return Err(ContractError::PoolNotExisted {});
@@ -611,5 +603,67 @@ pub mod query {
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn reply(_deps: DepsMut, _env: Env, _msg: Reply) -> Result<Response, ContractError> {
-    todo!()
+    const EXECUTE_REPLY_ID: u64 = 1u64;
+
+    match _msg.id {
+        EXECUTE_REPLY_ID => reply::update_pool_reserve(_deps, _env, _msg),
+        _id => {
+            return Err(ContractError::CustomError {
+                val: String::from("Id doesn't match"),
+            })
+        }
+    }
+}
+
+pub mod reply {
+    use super::*;
+    use cosmwasm_std::from_binary;
+    use cw0::parse_reply_execute_data;
+
+    pub fn update_pool_reserve(
+        _deps: DepsMut,
+        _env: Env,
+        _msg: Reply,
+    ) -> Result<Response, ContractError> {
+        let execute_reply_data = parse_reply_execute_data(_msg);
+
+        match execute_reply_data {
+            Ok(data) => {
+                let reply_data = data.data;
+
+                let response = match reply_data {
+                    Some(binary_data) => {
+                        let update_data: ExecutePoolReplyData = from_binary(&binary_data)?;
+
+                        let res = match execute::execute_update_liquidity(
+                            _deps,
+                            _env,
+                            UpdateLiquidiyParams {
+                                pool_address: update_data.pool_contract_address,
+                                amount_a: update_data.reserve_a,
+                                amount_b: update_data.reserve_b,
+                            },
+                        ) {
+                            Ok(data) => data,
+                            Err(_) => return Err(ContractError::UpateLiquidityFailed {}),
+                        };
+
+                        res
+                    }
+                    None => {
+                        return Err(ContractError::CustomError {
+                            val: String::from("Unable to find data!"),
+                        })
+                    }
+                };
+
+                Ok(response.add_attribute("function", "value"))
+            }
+            Err(_) => {
+                return Err(ContractError::CustomError {
+                    val: String::from("Unable to find data!"),
+                })
+            }
+        }
+    }
 }

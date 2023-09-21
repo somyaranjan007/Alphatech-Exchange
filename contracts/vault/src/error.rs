@@ -37,8 +37,11 @@ pub enum ContractError {
     #[error("Adding liquidity failed")]
     AddingLiquidityFailed {},
 
-    #[error("Unable to update liquidity ")]
+    #[error("Unable to update liquidity")]
     UpateLiquidityFailed {},
+
+    #[error("Overflow error")]
+    OverflowError {},
 
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },

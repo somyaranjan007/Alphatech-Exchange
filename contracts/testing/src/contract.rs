@@ -394,7 +394,7 @@ mod vault_tests {
                                         },
                                     );
 
-                                println!("return 2: {:?}", query_add_liquidity);
+                                // println!("return 2: {:?}", query_add_liquidity);
 
                                 let query_user_lp_balance: Result<cw20::BalanceResponse, _> =
                                     app.wrap().query_wasm_smart(
@@ -403,22 +403,35 @@ mod vault_tests {
                                             address: liquidity_provider.to_string().clone(),
                                         },
                                     );
-                                println!(
-                                    "query_user_lp_balance: {:?}",
-                                    query_user_lp_balance.unwrap()
-                                );
+                                // println!(
+                                //     "query_user_lp_balance: {:?}",
+                                //     query_user_lp_balance.unwrap()
+                                // );
 
-                                let _liquidity_allowance = app.execute_contract(
-                                    liquidity_provider.clone(),
-                                    Addr::unchecked(&data.value),
-                                    &uniswapv2_pool::msg::ExecuteMsg::IncreaseAllowance {
-                                        spender: vault_contract_address.to_string().clone(),
-                                        amount: Uint128::from(100u128),
-                                        expires: None,
-                                    },
-                                    &[],
-                                ).unwrap();
-                                
+                                let _liquidity_allowance = app
+                                    .execute_contract(
+                                        liquidity_provider.clone(),
+                                        Addr::unchecked(&data.value),
+                                        &uniswapv2_pool::msg::ExecuteMsg::IncreaseAllowance {
+                                            spender: vault_contract_address.to_string().clone(),
+                                            amount: Uint128::from(100u128),
+                                            expires: None,
+                                        },
+                                        &[],
+                                    )
+                                    .unwrap();
+
+                                let query_allowance: Result<cw20::AllowanceResponse, _> = app
+                                    .wrap()
+                                    .query_wasm_smart(
+                                        &data.value,
+                                        &cw20_base::msg::QueryMsg::Allowance {
+                                            owner: liquidity_provider.to_string(),
+                                            spender: vault_contract_address.to_string(),
+                                        },
+                                    );
+                                    
+                                println!("return 3: {:?} {:?}", query_allowance, vault_contract_address.clone());
 
                                 let execute_remove_liquidity = app
                                     .execute_contract(

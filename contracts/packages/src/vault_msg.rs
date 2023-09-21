@@ -1,17 +1,10 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::{Binary, Uint128};
+use cosmwasm_std::Uint128;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use crate::state::PoolData;
 
-/// Message type for `instantiate` entry_point
 #[cw_serde]
-pub struct InstantiateMsg {}
-
-/// Message type for `execute` entry_point
-#[cw_serde]
-pub enum ExecuteMsg {
+pub enum VaultExecuteMsg {
     /**
      * 1. RegisterFactory: This function allows the owner of the vault contract to register a factory contract.
      * Only the owner of the vault contract can call this function.
@@ -19,9 +12,7 @@ pub enum ExecuteMsg {
      * Parameters:
      * - `factory_address`: The address of the factory contract to be registered.
      */
-    RegisterFactory {
-        factory_address: String,
-    },
+    RegisterFactory { factory_address: String },
 
     /**
      * 2. RegisterPool: This function is used to register a pool contract in the vault.
@@ -75,40 +66,22 @@ pub enum ExecuteMsg {
     RemoveLiquidity(RemoveLiquidityParams),
 
     /**
-     * 5. UpdateReserves: This function allows the owner to update the liquidity reserves of a specific pool contract.
+     * 4. SwapTokens: This function allows a user to swap one token for another within a specific pool contract.
      *
-     * Parameters are defined in UpdateLiquidityParams:
-     * - `pool_address`: The address of the pool contract to update reserves for.
-     * - `amount_a`: The amount of the first token (token A) to add or remove from the liquidity reserves.
-     * - `amount_b`: The amount of the second token (token B) to add or remove from the liquidity reserves.
-     * - `feature`: An optional feature or description related to the liquidity update.
+     * Parameters are defined in SwapTokensParams:
+     * - `pool_address`: The address of the pool contract where the swap will occur.
+     * - `amount_in`: The amount of the input token to be swapped.
+     * - `amount_out_min`: The minimum amount of the output token expected in the swap.
+     * - `token_in`: The address or identifier of the input token.
+     * - `token_out`: The address or identifier of the output token.
+     * - `address_to`: The recipient's address for receiving the swapped tokens.
      *
-     * This function is used by the owner to adjust the liquidity reserves of a pool contract, which can affect the pool's behavior and pricing.
+     * Users can use this function to swap one token for another within a liquidity pool, specifying the pool address,
+     * the amount of input token to be swapped, the minimum amount of output token expected, the input and output token
+     * addresses, and the recipient's address for receiving the swapped tokens.
      */
-    // UpdateReserves(UpdateLiquidiyParams),
-
     SwapTokens(SwapTokensParams),
 }
-
-// #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
-// #[serde(rename_all = "snake_case")]
-// pub struct Cw20ReceiveMsg {
-//     pub sender: String,
-//     pub amount: Uint128,
-//     pub msg: Binary,
-// }
-
-// impl fmt::Display for Cw20ReceiveMsg {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         write!(
-//             f,
-//             "sender:{} amount:{} msg:{}",
-//             self.sender,
-//             self.amount,
-//             self.msg.to_string()
-//         )
-//     }
-// }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -146,14 +119,6 @@ pub struct RemoveLiquidityParams {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
-pub struct UpdateLiquidiyParams {
-    pub pool_address: String,
-    pub amount_a: Uint128,
-    pub amount_b: Uint128
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
-#[serde(rename_all = "snake_case")]
 pub struct SwapTokensParams {
     pub pool_address: String,
     pub amount_in: Uint128,
@@ -164,12 +129,6 @@ pub struct SwapTokensParams {
 }
 
 #[cw_serde]
-pub struct LiquidityAmounts {
-    pub amount_a: Uint128,
-    pub amount_b: Uint128,
-}
-
-#[cw_serde]
 #[derive(QueryResponses)]
 pub enum QueryMsg {
     #[returns(PoolData)]
@@ -177,32 +136,10 @@ pub enum QueryMsg {
 }
 
 #[cw_serde]
-pub struct TransferFrom {
-    pub owner: String,
-    pub recipient: String,
-    pub amount: Uint128,
-}
-
-/// Message type for `migrate` entry_point
-#[cw_serde]
-pub enum MigrateMsg {}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
-pub struct ContractMsg {
-    pub contract_address: String,
-    pub contract_msg: Binary,
-}
-
-
-#[cw_serde]
-pub struct QueryContractCw20Balance {
-    pub token_contract_address: String,
-    pub account_address: String
-}
-
-#[cw_serde]
-pub struct ExecutePoolReplyData {
-    pub pool_contract_address: String,
-    pub reserve_a: Uint128,
-    pub reserve_b: Uint128
+pub struct PoolData {
+    pub registered: bool,
+    pub token0: String,
+    pub token1: String,
+    pub reserve0: Uint128,
+    pub reserve1: Uint128
 }

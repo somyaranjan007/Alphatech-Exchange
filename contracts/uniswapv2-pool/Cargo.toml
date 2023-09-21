@@ -52,6 +52,7 @@ cw20 = "1.1.0"
 cw20-base = { version = "0.16.0", features = ["library"] }
 num = "0.4.1"
 cw-utils = "1.0.1"
+packages = { path = "../packages", version = "0.1.0" }
 
 [dev-dependencies]
 cw-multi-test = "0.13.2"

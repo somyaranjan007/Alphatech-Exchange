@@ -1,7 +1,7 @@
 [package]
-name = "vault"
+name = "packages"
 version = "0.1.0"
-authors = ["somyaranjan007 <somyaranjan122@gmail.com>"]
+authors = ["Somyaranjan Khatua <somyaranjankhatua122@gmail.com>"]
 edition = "2021"
 
 exclude = [
@@ -48,10 +48,6 @@ cw2 = "0.13.2"
 schemars = "0.8.8"
 serde = { version = "1.0.137", default-features = false, features = ["derive"] }
 thiserror = { version = "1.0.31" }
-uniswapv2-pool = { path = "../uniswapv2-pool", version = "0.1.0" }
-cw20-base = "1.1.0"
-cw20 = "1.1.0"
-cw0 = "0.10.3"
 
 [dev-dependencies]
-cw-multi-test = "0.13.4"
+cw-multi-test = "0.13.2"

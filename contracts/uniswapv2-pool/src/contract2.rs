@@ -101,7 +101,7 @@ pub mod execute {
     use cw20_base::allowances::{execute_increase_allowance, execute_transfer_from};
 
     pub fn execute_burn_lp_tokens(
-        mut _deps: DepsMut,
+        _deps: DepsMut,
         _env: Env,
         _info: MessageInfo,
         _cw20_receive_msg: Cw20ReceiveMsg,
@@ -122,7 +122,7 @@ pub mod execute {
 
         let pool_data: Result<PoolDataResponse, _> =
             _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                contract_addr: _remove_liquidity_pool_params.vault_contract_addresss.clone(),
+                contract_addr: _remove_liquidity_pool_params.vault_contract_addresss,
                 msg: to_binary(&VaultMsgEnums::QueryPoolData {
                     pool_address: _env.contract.address.to_string(),
                 })?,
@@ -145,40 +145,8 @@ pub mod execute {
                 if _remove_liquidity_pool_params.amount_a_min > amount0
                     || _remove_liquidity_pool_params.amount_b_min > amount1
                 {
-                    return Err(ContractError::CustomError {
-                        val: String::from("Insufficient A and B amount!"),
-                    });
+                    return Err(ContractError::CustomError { val: String::from("Ins") })
                 }
-
-                let information = MessageInfo {
-                    sender: _env.contract.address.clone(),
-                    funds: vec![],
-                };
-
-                let response =
-                    match execute_burn(_deps.branch(), _env.clone(), information, pool_balance) {
-                        Ok(response) => response,
-                        Err(_) => return Err(ContractError::BurnTokenFailed {}),
-                    };
-
-                let _reserve_a = data.reserve0.sub(amount0);
-                let _reserve_b = data.reserve1.sub(amount1);
-
-                let _execute_vault_tx = WasmMsg::Execute {
-                    contract_addr: _remove_liquidity_pool_params.vault_contract_addresss,
-                    msg: to_binary(&packages::msg::VaultExecuteMsg::RemoveLiquidity(packages::msg::RemoveLiquidityParams {
-                        token_a: data.token0,
-                        token_b: data.token1,
-                        reserve_a: _reserve_a,
-                        reserve_b: _reserve_b,
-                        amount_a: amount0,
-                        amount_b: amount1,
-                        address_to: _remove_liquidity_pool_params.address_to
-                    }))?,
-                    funds: vec![],
-                };
-
-                Ok(response.add_message(_execute_vault_tx))
             }
             Err(_) => {
                 return Err(ContractError::CustomError {
@@ -186,6 +154,22 @@ pub mod execute {
                 })
             }
         }
+
+        let information = MessageInfo {
+            sender: _env.contract.address.clone(),
+            funds: vec![],
+        };
+
+        // let burn_execute_tx = WasmMsg::Execute {
+        //     contract_addr: _env.contract.address.to_string(),
+        //     msg: to_binary(&ExecuteMsg::BurnLpToken { amount: liquidity })?,
+        //     funds: vec![],
+        // };
+        match execute_burn(_deps, _env, information, pool_balance) {
+            Ok(_) => Ok(Response::new().add_attribute("burnt", pool_balance)),
+            Err(_) => return Err(ContractError::BurnTokenFailed {}),
+        }
+
         //calculate amount
     }
 
@@ -292,6 +276,22 @@ pub mod execute {
 
         //8. update new reserve of token0 and token1
         // _update(balance0, balance1);  this will be updated from vault contract
+
+        let updated_reverse0= match pool_data{
+            Ok(data)=>(data.reserve0).add(amount0),
+            Err(_) => return Err(ContractError::FetchLiquidityFailed {}),
+        };
+
+        let updated_reverse1= match pool_data{
+            Ok(data)=>(data.reserve1).add(amount1),
+            Err(_) => return Err(ContractError::FetchLiquidityFailed {}),
+        };
+
+        Ok(Response::new()
+        .add_attribute("reserve0", updated_reserve0)
+        .add_attribute("reserve1", updated_reserve1)
+        .add_attribute("pool_address", _env.contract.address))
+        
     }
 
     //burn functionality

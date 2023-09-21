@@ -52,3 +52,4 @@ pub struct PoolData {
  */
 pub const POOL_REGISTER: Map<String, PoolData> = Map::new("pool_register");
 
+pub const VAULT_TOKENS_BALANCE: Map<String, Uint128> = Map::new("vault_token_balance");
