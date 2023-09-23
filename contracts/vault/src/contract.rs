@@ -95,7 +95,7 @@ pub mod execute {
      * @param _reserve_a The reserve of token A in the liquidity pool.
      * @param _reserve_b The reserve of token B in the liquidity pool.
      *
-  cle   * @returns Result<Uint128, ContractError> A Result containing the calculated `amount_b` or an error
+     * @returns Result<Uint128, ContractError> A Result containing the calculated `amount_b` or an error
      * if the calculation cannot be performed due to insufficient amounts or potential overflow.
      */
     fn calculate_amount(
