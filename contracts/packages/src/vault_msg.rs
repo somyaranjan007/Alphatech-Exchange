@@ -1,7 +1,8 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::Uint128;
+use cosmwasm_std::{Uint128, Binary};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[cw_serde]
 pub enum VaultExecuteMsg {
@@ -80,7 +81,7 @@ pub enum VaultExecuteMsg {
      * the amount of input token to be swapped, the minimum amount of output token expected, the input and output token
      * addresses, and the recipient's address for receiving the swapped tokens.
      */
-    SwapTokens(SwapTokensParams),
+    Receive(Cw20ReceiveMsg),
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -119,24 +120,65 @@ pub struct RemoveLiquidityParams {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
+pub struct Cw20ReceiveMsg {
+    pub sender: String,
+    pub amount: Uint128,
+    pub msg: Binary,
+}
+
+impl fmt::Display for Cw20ReceiveMsg {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "sender:{} amount:{} msg:{}",
+            self.sender,
+            self.amount,
+            self.msg.to_string()
+        )
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+#[serde(rename_all = "snake_case")]
 pub struct SwapTokensParams {
+    pub message: String,
     pub pool_address: String,
-    pub amount_in: Uint128,
     pub amount_out_min: Uint128,
     pub token_in: String,
     pub token_out: String,
     pub address_to: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+#[serde(rename_all = "snake_case")]
+pub struct UpdateLiquidiyParams {
+    pub pool_address: String,
+    pub amount_a: Uint128,
+    pub amount_b: Uint128
+}
+
+#[cw_serde]
+pub struct ContractMsg {
+    pub contract_address: String,
+    pub contract_msg: Binary
+}
+
+#[cw_serde]
+pub struct ExecutePoolReplyData {
+    pub pool_contract_address: String,
+    pub reserve_a: Uint128,
+    pub reserve_b: Uint128,
+}
+
 #[cw_serde]
 #[derive(QueryResponses)]
-pub enum QueryMsg {
-    #[returns(PoolData)]
+pub enum VaultQueryMsg {
+    #[returns(PoolDataResponse)]
     QueryPoolData { pool_address: String },
 }
 
 #[cw_serde]
-pub struct PoolData {
+pub struct PoolDataResponse {
     pub registered: bool,
     pub token0: String,
     pub token1: String,

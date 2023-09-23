@@ -51,6 +51,7 @@ thiserror = { version = "1.0.31" }
 uniswapv2-pool = { path = "../uniswapv2-pool", version = "0.1.0" }
 vault = { path = "../vault", version = "0.1.0" }
 factory = { path = "../factory", version = "0.1.0" }
+packages = { path = "../packages", version = "0.1.0" }
 cw20-base = "1.1.0"
 cw20 = "1.1.0"
 

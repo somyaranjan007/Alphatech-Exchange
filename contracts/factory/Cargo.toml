@@ -53,6 +53,7 @@ cw0 = "0.10.3"
 sha2 = "0.10.7"
 vault = { path = "../vault", version = "0.1.0" }
 uniswapv2-pool = { path = "../uniswapv2-pool", version = "0.1.0" }
+packages = { path = "../packages", version = "0.1.0" }
 
 [dev-dependencies]
 cw-multi-test = "0.13.2"

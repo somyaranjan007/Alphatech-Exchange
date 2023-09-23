@@ -146,7 +146,7 @@ pub fn handle_pool_instantiate(_deps: DepsMut, _msg: Reply) -> Result<Response, 
 
             match fetch_factory_data {
                 Ok(factory_data) => {
-                    let register_pool_params = vault::msg::RegisterPoolParams {
+                    let register_pool_params = packages::vault_msg::RegisterPoolParams {
                         pool_address: data.contract_address,
                         token0: match factory_data.token0 {
                             Some(data) => data,

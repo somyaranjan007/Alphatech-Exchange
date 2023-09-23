@@ -42,6 +42,9 @@ pub enum ContractError {
 
     #[error("Overflow error")]
     OverflowError {},
+    
+    #[error("Unable to swap")]
+    SwapFailed {},
 
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },

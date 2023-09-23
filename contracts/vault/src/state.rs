@@ -1,6 +1,5 @@
-use cosmwasm_std::{Uint128, Int128};
 use cw_storage_plus::{Item, Map};
-use cosmwasm_schema::cw_serde;
+use packages::vault_msg::PoolDataResponse;
 
 // VAULT_OWNER is used to store the address of the vault owner in the state.
 pub const VAULT_OWNER: Item<String> = Item::new("vault_owner");
@@ -12,7 +11,7 @@ pub const VAULT_OWNER: Item<String> = Item::new("vault_owner");
  * registered (true) or not registered (false).
  *
  * Example:
- * - Key: FactoryContractAddress1, Value: true (Registered)
+ * - Key: FactoryContractAddress1, Value: true (Registered2222222222222222222222)
  * - Key: FactoryContractAddress2, Value: false (Not Registered)
  * - Key: FactoryContractAddress3, Value: true (Registered)
  *
@@ -23,25 +22,6 @@ pub const VAULT_OWNER: Item<String> = Item::new("vault_owner");
 pub const FACTORY_REGISTER: Map<String, bool> = Map::new("factory_register");
 
 /**
- * `PoolData` is a struct used to store information about a registered pool contract in the vault.
- * - `registered`: when true (Registered) and when false (Not Registered)
- * - `token0`: The address or identifier of the first token in the pool's token pair.
- * - `token1`: The address or identifier of the second token in the pool's token pair.
- * - `reserve0`: The current reserve amount of `token0` held in the pool.
- * - `reserve1`: The current reserve amount of `token1` held in the pool.
- * - `lp_token_contract`: The address of the CW20 contract responsible for minting LP (Liquidity Provider) tokens
- *    when users provide liquidity to the pool.
- */
-#[cw_serde]
-pub struct PoolData {
-    pub registered: bool,
-    pub token0: String,
-    pub token1: String,
-    pub reserve0: Uint128,
-    pub reserve1: Uint128
-}
-
-/**
  * `POOL_REGISTER` is a mapping used to store information about registered pool contracts in the vault.
  *
  * When a pool contract is registered in the vault contract, all the relevant data is saved in this mapping.
@@ -50,6 +30,4 @@ pub struct PoolData {
  * 
  * note: we are sending pool addresses in the events so that you can find addressess and store them for fetching pool data
  */
-pub const POOL_REGISTER: Map<String, PoolData> = Map::new("pool_register");
-
-pub const VAULT_TOKENS_BALANCE: Map<String, Uint128> = Map::new("vault_token_balance");
+pub const POOL_REGISTER: Map<String, PoolDataResponse> = Map::new("pool_register");

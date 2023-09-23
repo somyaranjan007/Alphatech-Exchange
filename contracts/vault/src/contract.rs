@@ -1,3 +1,6 @@
+use crate::error::ContractError;
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::state::{FACTORY_REGISTER, POOL_REGISTER, VAULT_OWNER};
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
@@ -5,16 +8,10 @@ use cosmwasm_std::{
     StdError, StdResult, SubMsg, Uint128, WasmMsg, WasmQuery,
 };
 use cw2::set_contract_version;
-
-use crate::error::ContractError;
-
-use crate::msg::{
-    AddLiquidityParams, ContractMsg, ExecuteMsg, ExecutePoolReplyData, InstantiateMsg,
-    LiquidityAmounts, QueryContractCw20Balance, QueryMsg, RegisterPoolParams,
-    RemoveLiquidityParams, SwapTokensParams, UpdateLiquidiyParams,
+use packages::vault_msg::{
+    AddLiquidityParams, ContractMsg, Cw20ReceiveMsg, ExecutePoolReplyData, PoolDataResponse,
+    RegisterPoolParams, RemoveLiquidityParams, SwapTokensParams, UpdateLiquidiyParams,
 };
-
-use crate::state::{PoolData, FACTORY_REGISTER, POOL_REGISTER, VAULT_OWNER, VAULT_TOKENS_BALANCE};
 
 const CONTRACT_NAME: &str = "crates.io:vault";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -36,11 +33,6 @@ pub fn instantiate(
         .add_attribute("owner", info.sender))
 }
 
-// #[cfg_attr(not(feature = "library"), entry_point)]
-// pub fn migrate(_deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
-//     match msg {}
-// }
-
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     _deps: DepsMut,
@@ -61,19 +53,21 @@ pub fn execute(
         ExecuteMsg::RemoveLiquidity(remove_liquidity_params) => {
             execute::execute_remove_liquidity(_deps, _env, _info, remove_liquidity_params)
         }
-        ExecuteMsg::SwapTokens(swap_token_params) => {
-            execute::execute_swap_tokens(_deps, _env, _info, swap_token_params)
+        ExecuteMsg::Receive(cw_receive_msg) => {
+            execute::execute_swap_tokens(_deps, _env, _info, cw_receive_msg)
         }
     }
 }
 
 pub mod execute {
-    use std::ops::{AddAssign, SubAssign};
+    use cosmwasm_std::from_binary;
 
     use super::*;
+    use std::ops::{AddAssign, SubAssign};
 
-    /* internal functions */
     /**
+     * Internal Functions
+     *
      * 1. execute_wasm_execute: This function generates multiple `Execute` messages to interact with other CosmWasm contracts.
      *
      * @param _contract_msg A vector of `ContractMsg` objects, each containing information about the target contract
@@ -94,36 +88,27 @@ pub mod execute {
         execute_messages
     }
 
-    fn get_cw20_token_balance(
-        _deps: DepsMut,
-        _query_contract: QueryContractCw20Balance,
-    ) -> cw20::BalanceResponse {
-        let query_cw20_balance: Result<cw20::BalanceResponse, _> =
-            _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                contract_addr: _query_contract.token_contract_address,
-                msg: to_binary(&cw20_base::msg::QueryMsg::Balance {
-                    address: _query_contract.account_address,
-                })
-                .unwrap(),
-            }));
-
-        match query_cw20_balance {
-            Ok(data) => data,
-            Err(_) => cw20::BalanceResponse {
-                balance: Uint128::zero(),
-            },
-        }
-    }
-
+    /**
+     * 2. Calculate Amount: This function calculates the value of `amount_b` based on the provided parameters.
+     *
+     * @param _amount_a The input amount.
+     * @param _reserve_a The reserve of token A in the liquidity pool.
+     * @param _reserve_b The reserve of token B in the liquidity pool.
+     *
+  cle   * @returns Result<Uint128, ContractError> A Result containing the calculated `amount_b` or an error
+     * if the calculation cannot be performed due to insufficient amounts or potential overflow.
+     */
     fn calculate_amount(
         _amount_a: Uint128,
         _reserve_a: Uint128,
         _reserve_b: Uint128,
     ) -> Result<Uint128, ContractError> {
+        // Check if _amount_a is zero; in that case, it's impossible to perform the calculation.
         if _amount_a == Uint128::zero() {
             return Err(ContractError::InsufficientAmount {});
         }
 
+        // Check if both reserves are greater than zero, as it's required for the calculation.
         if _reserve_a > Uint128::zero() && _reserve_b > Uint128::zero() {
             let _amount_b = match _amount_a.checked_mul(_reserve_b) {
                 Ok(data) => match data.checked_div(_reserve_a) {
@@ -220,8 +205,8 @@ pub mod execute {
             },
             ContractMsg {
                 contract_address: _params.pool_address,
-                contract_msg: to_binary(&uniswapv2_pool::msg::ExecuteMsg::Mint(
-                    uniswapv2_pool::msg::MintRecieveParams {
+                contract_msg: to_binary(&packages::pool_msg::PoolExecuteMsg::Mint(
+                    packages::pool_msg::MintRecieveParams {
                         to: _info.sender.to_string(),
                         amount0: _amount_a,
                         amount1: _amount_b,
@@ -288,7 +273,7 @@ pub mod execute {
                     });
                 } else {
                     // Create a new `PoolData` instance to store pool registration information
-                    let pool_data = PoolData {
+                    let pool_data = PoolDataResponse {
                         registered: true,
                         token0: _register_pool_params.token0,
                         token1: _register_pool_params.token1,
@@ -446,7 +431,7 @@ pub mod execute {
         let _update_pool_register = POOL_REGISTER.update(
             _deps.storage,
             _update_liquidity_params.pool_address,
-            |pool_data| -> Result<PoolData, ContractError> {
+            |pool_data| -> Result<PoolDataResponse, ContractError> {
                 match pool_data {
                     Some(mut pool) => {
                         pool.reserve0 = _update_liquidity_params.amount_a;
@@ -468,8 +453,15 @@ pub mod execute {
         _deps: DepsMut,
         _env: Env,
         _info: MessageInfo,
-        _swap_token_params: SwapTokensParams,
+        _cw20_receive_msg: Cw20ReceiveMsg,
     ) -> Result<Response, ContractError> {
+        let message = String::from("execute_swap_tokens");
+        let _swap_token_params: SwapTokensParams = from_binary(&_cw20_receive_msg.msg)?;
+
+        if message != _swap_token_params.message {
+            return Err(ContractError::SwapFailed {});
+        }
+
         let pool_exist = POOL_REGISTER.load(_deps.storage, _swap_token_params.pool_address.clone());
 
         match pool_exist {
@@ -481,18 +473,18 @@ pub mod execute {
                     let amount_out: Result<Uint128, _> =
                         _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
                             contract_addr: _swap_token_params.pool_address.clone(),
-                            msg: to_binary(&uniswapv2_pool::msg::QueryMsg::GetAmountOut(
-                                uniswapv2_pool::msg::AmountOutParams {
-                                    amountIn: _swap_token_params.amount_in,
-                                    reserveIn: data.reserve0,
-                                    reserveOut: data.reserve1,
+                            msg: to_binary(&packages::pool_msg::PoolQueryMsg::GetAmountOut(
+                                packages::pool_msg::AmountOutParams {
+                                    amount_in: _cw20_receive_msg.amount,
+                                    reserve_in: data.reserve0,
+                                    reserve_out: data.reserve1,
                                 },
                             ))?,
                         }));
 
                     match amount_out {
                         Ok(_amount_out) => {
-                            updated_amount_a.add_assign(_swap_token_params.amount_in);
+                            updated_amount_a.add_assign(_cw20_receive_msg.amount);
                             updated_amount_b.sub_assign(_amount_out);
                             _amount_out
                         }
@@ -506,11 +498,11 @@ pub mod execute {
                     let amount_out: Result<Uint128, _> =
                         _deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
                             contract_addr: _swap_token_params.pool_address.clone(),
-                            msg: to_binary(&uniswapv2_pool::msg::QueryMsg::GetAmountOut(
-                                uniswapv2_pool::msg::AmountOutParams {
-                                    amountIn: _swap_token_params.amount_in,
-                                    reserveIn: data.reserve1,
-                                    reserveOut: data.reserve0,
+                            msg: to_binary(&packages::pool_msg::PoolQueryMsg::GetAmountOut(
+                                packages::pool_msg::AmountOutParams {
+                                    amount_in: _cw20_receive_msg.amount,
+                                    reserve_in: data.reserve1,
+                                    reserve_out: data.reserve0,
                                 },
                             ))?,
                         }));
@@ -518,7 +510,7 @@ pub mod execute {
                     match amount_out {
                         Ok(_amount_out) => {
                             updated_amount_a.sub_assign(_amount_out);
-                            updated_amount_b.add_assign(_swap_token_params.amount_in);
+                            updated_amount_b.add_assign(_cw20_receive_msg.amount);
                             _amount_out
                         }
                         Err(_) => {
@@ -539,27 +531,16 @@ pub mod execute {
                     },
                 ) {
                     Ok(response) => {
-                        let execute_messages = execute_wasm_execute(vec![
-                            ContractMsg {
-                                contract_address: _swap_token_params.token_out,
-                                contract_msg: to_binary(&cw20_base::msg::ExecuteMsg::Transfer {
-                                    recipient: _swap_token_params.address_to,
-                                    amount: _amount_out,
-                                })?,
-                            },
-                            ContractMsg {
-                                contract_address: _swap_token_params.token_in,
-                                contract_msg: to_binary(
-                                    &cw20_base::msg::ExecuteMsg::TransferFrom {
-                                        owner: _info.sender.to_string(),
-                                        recipient: _env.contract.address.to_string(),
-                                        amount: _swap_token_params.amount_in,
-                                    },
-                                )?,
-                            },
-                        ]);
+                        let execute_message = WasmMsg::Execute {
+                            contract_addr: _swap_token_params.token_out,
+                            msg: to_binary(&cw20_base::msg::ExecuteMsg::Transfer {
+                                recipient: _swap_token_params.address_to,
+                                amount: _amount_out,
+                            })?,
+                            funds: vec![],
+                        };
 
-                        Ok(response.add_messages(execute_messages))
+                        Ok(response.add_message(execute_message))
                     }
                     Err(_) => {
                         return Err(ContractError::CustomError {
@@ -587,7 +568,11 @@ pub fn query(_deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 pub mod query {
     use super::*;
 
-    pub fn query_pool_data(_deps: Deps, _env: Env, _pool_address: String) -> StdResult<PoolData> {
+    pub fn query_pool_data(
+        _deps: Deps,
+        _env: Env,
+        _pool_address: String,
+    ) -> StdResult<PoolDataResponse> {
         let pool_data = POOL_REGISTER.load(_deps.storage, _pool_address);
 
         match pool_data {
